@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+data/textbooks/
+data/textbook_images/
+vectorstore/
+processed/
+data/uploads/
+*.pth
+*.bin

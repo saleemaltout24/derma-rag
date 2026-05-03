@@ -8,7 +8,7 @@ TEXTBOOK_IMAGE_DIR = DATA_DIR / "textbook_images"
 UPLOAD_DIR = DATA_DIR / "uploads"
 PROCESSED_DIR = BASE_DIR / "processed"
 
-VECTORSTORE_DIR = Path("C:/derma_rag_vectorstore")
+VECTORSTORE_DIR = BASE_DIR / "vectorstore"
 VECTORSTORE_DIR.mkdir(parents=True, exist_ok=True)
 
 CHUNKS_PATH = PROCESSED_DIR / "chunks.json"
@@ -18,7 +18,7 @@ TEXT_INDEX_PATH = VECTORSTORE_DIR / "faiss_index"
 IMAGE_INDEX_PATH = VECTORSTORE_DIR / "image_faiss_index"
 
 EMBED_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
-CHAT_MODEL = "mistral:7b"
+CHAT_MODEL = "llama3.2:1b"
 VISION_MODEL = "llama3.2-vision"
 CLIP_MODEL = "openai/clip-vit-base-patch32"
 

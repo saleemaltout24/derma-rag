@@ -1,40 +1,10 @@
 import os
-from ollama import chat
-from backend.config import VISION_MODEL
 
-
-def analyze_skin_image(image_path: str) -> str:
+def analyze_skin_image(image_path: str, timeout: int = 120) -> str:
+    """
+    Skip slow vision model - use CLIP similarity search instead.
+    Returns a placeholder description; actual analysis comes from image_vector_store matches.
+    """
     if not os.path.exists(image_path):
-        return "Vision model error: image file not found."
-
-    prompt = """
-Describe this dermatology image only from visible findings.
-Do not diagnose yet.
-
-Focus on:
-- color
-- shape
-- borders
-- texture
-- scale or crust
-- distribution if visible
-- severity if visible
-- image quality limitations
-
-Return a short clinical-style visual description.
-"""
-
-    try:
-        response = chat(
-            model=VISION_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                    "images": [image_path],
-                }
-            ],
-        )
-        return response["message"]["content"].strip()
-    except Exception as e:
-        return f"Vision model error: {str(e)}"
+        return "Image file not found."
+    return "User uploaded a skin image for analysis. Please refer to the similar textbook images below for context."
