@@ -5,6 +5,7 @@ from backend.state_extractor import extract_structured_state
 from backend.state_manager import merge_state, build_search_query, format_state_for_prompt
 from backend.vector_store import search as search_text
 from backend.llm import run_llm
+from backend.skin_classifier import classify_skin_image
 
 
 def build_text_context(docs: list) -> str:
@@ -21,28 +22,13 @@ def build_text_context(docs: list) -> str:
 def build_image_context(image_matches: list) -> str:
     if not image_matches:
         return "No similar textbook images found."
-
     parts = []
-
     for i, item in enumerate(image_matches, start=1):
-
         disease = item.get("disease", "unknown")
         body_site = item.get("body_site", "unknown")
         caption = item.get("caption", "")
         nearby = item.get("nearby_text", "")
-
-        parts.append(
-            f"""
-Match {i}
-Possible condition: {disease}
-Body site: {body_site}
-Caption: {caption}
-
-Medical description:
-{nearby}
-"""
-        )
-
+        parts.append(f"Match {i}\nPossible condition: {disease}\nBody site: {body_site}\nCaption: {caption}\nMedical description:\n{nearby}")
     return "\n".join(parts)
 
 
@@ -50,83 +36,68 @@ def build_multimodal_prompt(
     question: str,
     history_text: str,
     structured_state: str,
-    image_description: str,
     image_context: str,
     text_context: str,
+    classification: dict,
     language: str,
 ) -> str:
+    predicted = classification.get("predicted_name", "Unknown")
+    confidence = classification.get("confidence", 0)
+    all_preds = classification.get("all_predictions", [])
+    top3 = all_preds[:3]
+    top3_text = "\n".join([f"- {p['name']}: {p['confidence']:.1f}%" for p in top3])
+    confidence_note = "HIGH confidence" if confidence >= 70 else "MODERATE confidence" if confidence >= 50 else "LOW confidence — treat as approximate"
+
     if language == "tr":
         return f"""
 Sen hasta dostu bir dermatoloji asistanısın.
 
-Kurallar:
-- Cevabı sadece Türkçe ver.
+GÖREVIN: Aşağıdaki derin öğrenme tahminini esas alarak hastaya açıklama yap.
+TAHMİN: {predicted} (%{confidence:.1f} - {confidence_note})
+
+KURALLAR:
+- Cevabını MUTLAKA "{predicted}" ile başlat.
+- Sadece {predicted} hakkında konuş — başka hastalık önerme.
 - Kesin tanı koyma.
-- Görsel benzerlik ve kitap bilgisini birlikte değerlendir.
-- En olası yaygın durumları önce düşün.
-- Kısa, anlaşılır ve pratik yaz.
-- Kullanıcıyı gereksiz korkutma.
+- Sadece Türkçe cevap ver.
+- Aşağıdaki ders kitabı bilgisini yalnızca {predicted} ile ilgiliyse kullan.
+- İlgisiz bilgi ekleme.
 
-Konuşma geçmişi:
-{history_text}
+Derin öğrenme modeli sonuçları:
+{top3_text}
 
-Yapısal durum özeti:
-{structured_state}
+Kullanıcının sorusu: {question}
 
-Kullanıcının yazdığı mesaj:
-{question}
-
-Yüklenen görselin açıklaması:
-{image_description}
-
-Benzer ders kitabı görselleri:
-{image_context}
-
-İlgili ders kitabı metinleri:
+{predicted} hakkında ders kitabı bilgisi:
 {text_context}
 
 Cevap formatı:
-1. En olası durum
-2. Neden buna benziyor
+1. En olası durum: {predicted} (%{confidence:.1f} güven)
+2. Bu hastalık nedir ve neden bu tanı
 3. Ne yapabilirsiniz
 4. Ne zaman doktora görünmeli
 """
-    return f"""
-You are a patient-friendly dermatology assistant.
+    return f"""You are a dermatology assistant. Answer in 4 short sections.
+
+PREDICTION: {predicted} ({confidence:.1f}% confidence)
+{top3_text}
+
+User question: {question}
+
+Relevant textbook info:
+{text_context[:500]}
 
 Rules:
-- Answer only in English.
-- Do not give a confirmed diagnosis.
-- Use both visual similarity and textbook text.
-- Focus on the most likely common conditions first.
-- Keep the answer practical and easy to understand.
-- Do not scare the user unnecessarily.
+- Start with "Most likely condition: **{predicted}**"
+- Do NOT describe the image visually
+- Keep each section to 2-3 sentences max
 
-Conversation history:
-{history_text}
-
-Structured state:
-{structured_state}
-
-User message:
-{question}
-
-Uploaded image description:
-{image_description}
-
-Similar textbook images:
-{image_context}
-
-Relevant textbook text:
-{text_context}
-
-Answer format:
-1. Most likely condition
-2. Why it may match
-3. What you can do
-4. When to see a doctor
+Answer format — follow this EXACTLY, do not skip any section:
+1. Most likely condition: **{predicted}** ({confidence:.1f}% confidence) — write this line exactly
+2. What is {predicted}: explain in 2-3 sentences what this disease is
+3. What to do: 2-3 bullet points of practical advice
+4. When to see a doctor: 1-2 sentences
 """
-
 
 def answer_multimodal_question(
     question: str,
@@ -141,10 +112,16 @@ def answer_multimodal_question(
     extracted = extract_structured_state(question or "", history_text)
     updated_state = merge_state(current_state, extracted)
 
+    # Run classifier first
+    classification = classify_skin_image(image_path)
+    predicted_name = classification['predicted_name']
+    print(f"[Classifier] {predicted_name} ({classification['confidence']}%)")
+
     image_description = analyze_skin_image(image_path)
     image_matches = search_similar_images(image_path, k=3)
 
-    text_query = build_search_query(question or image_description, updated_state, language)
+    # Search RAG using predicted disease name — not just the question
+    text_query = f"{predicted_name} {question}".strip()
     text_docs = search_text(text_query, k=4)
 
     image_context = build_image_context(image_matches)
@@ -155,11 +132,11 @@ def answer_multimodal_question(
         question=question or "",
         history_text=history_text,
         structured_state=structured_state_text,
-        image_description=image_description,
         image_context=image_context,
         text_context=text_context,
+        classification=classification,
         language=language,
     )
 
     answer = run_llm(prompt)
-    return answer, updated_state, image_description, image_matches, text_docs
+    return answer, updated_state, image_description, image_matches, text_docs, classification

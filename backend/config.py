@@ -18,7 +18,7 @@ TEXT_INDEX_PATH = VECTORSTORE_DIR / "faiss_index"
 IMAGE_INDEX_PATH = VECTORSTORE_DIR / "image_faiss_index"
 
 EMBED_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
-CHAT_MODEL = "llama3.2:1b"
+CHAT_MODEL = "qwen2.5:3b"
 VISION_MODEL = "llama3.2-vision"
 CLIP_MODEL = "openai/clip-vit-base-patch32"
 
