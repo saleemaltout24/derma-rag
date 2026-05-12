@@ -1,5 +1,8 @@
 venv/
+.venv/
+.env
 __pycache__/
+frontend/node_modules/
 *.pyc
 data/textbooks/
 data/textbook_images/

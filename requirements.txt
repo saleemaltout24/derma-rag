@@ -9,3 +9,7 @@ pillow
 pymupdf
 python-multipart
 opencv-python
+lingua-language-detector
+ollama
+python-dotenv
+onnxruntime

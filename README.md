@@ -43,7 +43,7 @@ uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 
 Terminal 3:
 ```bash
-cd frontend/frontend
+cd frontend
 npm install
 npm run dev
 ```
