@@ -1,0 +1,18 @@
+{
+  "folders": [
+    {
+      "name": "derma-rag-main (local)",
+      "path": "."
+    },
+    {
+      "name": "derma-rag-remote-check (github clone)",
+      "path": "..\\derma-rag-remote-check"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.git": true,
+      "**/__pycache__": true
+    }
+  }
+}

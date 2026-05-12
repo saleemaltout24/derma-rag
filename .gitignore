@@ -6,7 +6,9 @@ __pycache__/
 data/textbooks/
 data/textbook_images/
 vectorstore/
+data/vectorstore/
 processed/
 data/uploads/
 *.pth
 *.bin
+node_modules/
