@@ -7,7 +7,11 @@ from uuid import uuid4
 from typing import Dict, List, Optional
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import DEBUG_PAYLOADS, UPLOAD_DIR
-from backend.intent_router import classify_user_intent, general_help_response
+from backend.intent_router import (
+    classify_user_intent,
+    general_help_response,
+    out_of_scope_response,
+)
 from backend.rag_pipeline import answer_medical_question, detect_language
 from backend.multimodal_pipeline import answer_multimodal_question
 from backend.session_store import load_session_data, persist_session_data, reset_session_data
@@ -105,6 +109,19 @@ async def chat(
             history.append({"role": "user", "content": question})
             history.append({"role": "assistant", "content": answer})
 
+            return {
+                "session_id": session_id,
+                "intent": intent,
+                "answer": answer,
+                "structured_state": session_state.get(session_id, state),
+                "history": history,
+            }
+
+        if intent == "OUT_OF_SCOPE":
+            reply_lang = session_languages.get(session_id) or detect_language(question)
+            answer = out_of_scope_response(reply_lang)
+            history.append({"role": "user", "content": question})
+            history.append({"role": "assistant", "content": answer})
             return {
                 "session_id": session_id,
                 "intent": intent,
@@ -219,6 +236,10 @@ def ask(question: str, session_id: str = "default"):
         elif intent == "GENERAL_HELP":
             current_language = session_languages.get(session_id) or detect_language(question)
             answer = general_help_response(current_language)
+
+        elif intent == "OUT_OF_SCOPE":
+            reply_lang = session_languages.get(session_id) or detect_language(question)
+            answer = out_of_scope_response(reply_lang)
 
         else:
             current_language = session_languages.get(session_id)
