@@ -1,113 +1,57 @@
-# Derma-RAG
+# Derma RAG Chatbot
 
-Local-first dermatology assistant with:
-- Textbook-grounded RAG over dermatology PDFs
-- Optional image similarity against textbook figures
-- Bilingual English/Turkish conversation
-- Ollama-backed chat and optional vision support
+A dermatology assistant chatbot using RAG + LLM + image processing.
 
-This is an educational support tool and not a substitute for clinical care.
+## Requirements
+- macOS
+- Python 3.10
+- Node.js 22+
+- Ollama
 
-## Tech stack
+## Setup Steps
 
-- Backend: FastAPI + Uvicorn
-- Retrieval: sentence-transformers + FAISS
-- Image pipeline: CLIP + FAISS + PyMuPDF/OpenCV extraction
-- LLM serving: Ollama
-- Frontend: React + Vite + Tailwind
-
-## Prerequisites
-
-- Python 3.10+
-- Node.js 20+
-- Ollama running locally
-
-## Quickstart
-
-### 1) Python environment
-
-Windows PowerShell:
+### 1. Create Python virtual environment
 ```bash
-python -m venv .venv
-.venv\Scripts\Activate.ps1
+python3.10 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-macOS/Linux:
+### 2. Install Ollama
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+brew install ollama
+ollama pull llama3.2:1b
 ```
 
-### 2) Configure environment
-
+### 3. Fix paths for your machine
 ```bash
-copy .env.example .env
+python fix_paths.py
 ```
 
-Update `.env` if needed (especially model tags and paths).
-You can tune retrieval via `ENABLE_RERANK`, `RETRIEVE_TOP_K`, and `RERANK_TOP_K`.
-Optional persistence is available with `USE_SQLITE_SESSIONS=true`.
-Use `DEBUG_PAYLOADS=false` to hide retrieval internals from API responses.
+### 4. Run the app
 
-### 3) Pull Ollama models
-
+Terminal 1:
 ```bash
-ollama pull mistral:7b
-ollama pull llama3.2-vision
+ollama serve
 ```
 
-### 4) Build local data artifacts
-
-Place textbooks under `data/textbooks/*.pdf`, then run:
-
+Terminal 2:
 ```bash
-python scripts/process_books.py
-python scripts/create_embeddings.py
-python scripts/extract_textbook_images.py
-python scripts/create_image_embeddings.py
-```
-
-### 5) Start backend
-
-```bash
+source venv/bin/activate
 uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 6) Start frontend
-
+Terminal 3:
 ```bash
-cd frontend
+cd frontend/frontend
 npm install
 npm run dev
 ```
 
-UI default: `http://127.0.0.1:5173`  
-API default: `http://127.0.0.1:8000`
+### 5. Open browser
+Go to http://localhost:5173
 
-## API endpoints
-
-- `POST /chat` (multipart form: `session_id`, `question`, optional `file`)
-- `POST /reset` (`session_id`)
-- `GET /ask` (`question`, `session_id`)
-- `GET /health`
-
-`/chat` and `/ask` responses include `retrieval_debug` for retrieval/rerank traceability.
-
-## Important notes
-
-- FAISS indexes depend on the embedding model. If `EMBEDDING_MODEL` changes, rebuild indexes.
-- Chunks now include `page_start/page_end`; rerun ingestion before rebuilding embeddings after schema changes.
-- Uploads are stored temporarily and removed after each request.
-- Optional System B classifier contract is exposed in API responses as `classifier_result`.
-- Optional ONNX classifier runtime:
-  - set `ENABLE_CLASSIFIER=true`
-  - set `CLASSIFIER_MODEL_PATH=/path/to/model.onnx`
-  - optional class names with `CLASSIFIER_LABELS=eczema,psoriasis,acne,...`
-- Retrieval eval scaffold:
-  - `python scripts/evaluate_retrieval.py`
-  - optional input file: `python scripts/evaluate_retrieval.py data/eval_queries.sample.json`
-- End-to-end text eval scaffold:
-  - `python scripts/evaluate_end_to_end.py`
-  - custom API/cases: `python scripts/evaluate_end_to_end.py http://127.0.0.1:8000 data/eval_end_to_end.sample.json`
+## Notes
+- vectorstore/ and processed/ folders must be present (get from project owner)
+- data/textbook_images/ folder must be present (get from project owner)
+- data/textbooks/ folder must be present (get from project owner)
