@@ -9,7 +9,7 @@ from sentence_transformers import SentenceTransformer
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
 
-from backend.config import CHUNKS_PATH, TEXT_INDEX_PATH, EMBED_MODEL
+from backend.config import CHUNKS_PATH, TEXT_INDEX_MANIFEST_PATH, TEXT_INDEX_PATH, EMBED_MODEL
 
 
 def main():
@@ -18,9 +18,9 @@ def main():
     with open(CHUNKS_PATH, "r", encoding="utf-8") as f:
         chunks = json.load(f)
 
-    texts = [c["text"] for c in chunks if c.get("text") and c["text"].strip()]
+    texts = [(c.get("text") or " ").strip() or " " for c in chunks]
 
-    print(f"Loaded {len(texts)} chunks.")
+    print(f"Loaded {len(chunks)} chunks.")
     print(f"Loading model: {EMBED_MODEL}")
 
     model = SentenceTransformer(EMBED_MODEL)
@@ -41,6 +41,14 @@ def main():
     print(f"Saving index to: {TEXT_INDEX_PATH}")
 
     faiss.write_index(index, str(TEXT_INDEX_PATH))
+    manifest = {
+        "embedding_model": EMBED_MODEL,
+        "dimension": int(embeddings.shape[1]),
+        "num_vectors": int(embeddings.shape[0]),
+        "chunks_path": str(CHUNKS_PATH),
+    }
+    with open(TEXT_INDEX_MANIFEST_PATH, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
 
     print("Text vector database created successfully.")
     print(f"Saved to: {TEXT_INDEX_PATH}")

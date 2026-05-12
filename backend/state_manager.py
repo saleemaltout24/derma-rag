@@ -1,4 +1,23 @@
+import re
 from typing import Any
+
+
+def looks_like_definition_question(message: str) -> bool:
+    """Heuristic: user wants a concept definition (improves embedding query)."""
+    t = message.strip().lower()
+    if not t:
+        return False
+    if re.search(
+        r"\b(what\s+is|what\'?s|what\s+are|define|definition(\s+of)?|meaning(\s+of)?)\b",
+        t,
+    ):
+        return True
+    if re.search(
+        r"\b(nedir|tanımı|tanım(\s+nedir)?|tanımla|anlamı|ne\s+demek)\b",
+        t,
+    ):
+        return True
+    return False
 
 
 def create_empty_state() -> dict[str, Any]:
@@ -46,7 +65,16 @@ def merge_state(current: dict[str, Any], update: dict[str, Any]) -> dict[str, An
 
 
 def build_search_query(user_message: str, state: dict[str, Any], language: str) -> str:
-    lines = [f"Current question: {user_message.strip()}"]
+    q = user_message.strip()
+    if looks_like_definition_question(q):
+        if language == "tr":
+            q_for_search = f"tanım dermatoloji {q}"
+        else:
+            q_for_search = f"definition dermatology {q}"
+    else:
+        q_for_search = q
+
+    lines = [f"Current question: {q_for_search}"]
 
     if state.get("body_site"):
         lines.append(f"Body site: {state['body_site']}")
