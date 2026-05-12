@@ -3,16 +3,9 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 from sentence_transformers import SentenceTransformer
-import torch
+from backend.config import EMBED_MODEL
 
-from backend.config import EMBED_MODEL, HARDWARE_PROFILE
-
-if HARDWARE_PROFILE == "gpu" and torch.cuda.is_available():
-    MODEL_DEVICE = "cuda"
-else:
-    MODEL_DEVICE = "cpu"
-
-model = SentenceTransformer(EMBED_MODEL, device=MODEL_DEVICE)
+model = SentenceTransformer(EMBED_MODEL, device="cpu")
 
 def embed(text: str):
     return model.encode(

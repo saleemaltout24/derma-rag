@@ -102,25 +102,19 @@ def split_long_paragraph(paragraph: str, max_chars: int = 900) -> list[str]:
     return pieces
 
 
-def build_semantic_chunks(paragraphs_with_pages: list[dict]) -> list[dict]:
+def build_semantic_chunks(paragraphs: list[str]) -> list[dict]:
     chunks = []
     current_chunk = ""
     current_section = "Unknown section"
-    current_pages = []
 
-    for item in paragraphs_with_pages:
-        raw_paragraph = item["text"]
-        page = item["page"]
+    for raw_paragraph in paragraphs:
         if is_heading(raw_paragraph):
             if current_chunk.strip():
                 chunks.append({
                     "section_title": current_section,
                     "text": current_chunk.strip(),
-                    "page_start": min(current_pages) if current_pages else None,
-                    "page_end": max(current_pages) if current_pages else None,
                 })
                 current_chunk = ""
-                current_pages = []
 
             current_section = raw_paragraph.strip()
             continue
@@ -132,58 +126,41 @@ def build_semantic_chunks(paragraphs_with_pages: list[dict]) -> list[dict]:
 
             if len(candidate) <= MAX_CHARS:
                 current_chunk = candidate
-                current_pages.append(page)
             else:
                 if current_chunk.strip():
                     chunks.append({
                         "section_title": current_section,
                         "text": current_chunk.strip(),
-                        "page_start": min(current_pages) if current_pages else page,
-                        "page_end": max(current_pages) if current_pages else page,
                     })
 
                     overlap = current_chunk[-OVERLAP_CHARS:] if len(current_chunk) > OVERLAP_CHARS else current_chunk
                     current_chunk = f"{overlap}\n\n{paragraph}".strip()
-                    current_pages = [page]
                 else:
                     chunks.append({
                         "section_title": current_section,
                         "text": paragraph.strip(),
-                        "page_start": page,
-                        "page_end": page,
                     })
                     current_chunk = ""
-                    current_pages = []
 
     if current_chunk.strip():
         chunks.append({
             "section_title": current_section,
             "text": current_chunk.strip(),
-            "page_start": min(current_pages) if current_pages else None,
-            "page_end": max(current_pages) if current_pages else None,
         })
 
     merged = []
     for chunk in chunks:
         if merged and len(chunk["text"]) < MIN_CHARS:
             merged[-1]["text"] = f'{merged[-1]["text"]}\n\n{chunk["text"]}'.strip()
-            prev_start = merged[-1].get("page_start")
-            prev_end = merged[-1].get("page_end")
-            curr_start = chunk.get("page_start")
-            curr_end = chunk.get("page_end")
-            if curr_start is not None:
-                merged[-1]["page_start"] = curr_start if prev_start is None else min(prev_start, curr_start)
-            if curr_end is not None:
-                merged[-1]["page_end"] = curr_end if prev_end is None else max(prev_end, curr_end)
         else:
             merged.append(chunk)
 
     return merged
 
 
-def extract_pdf_pages(pdf_path: Path) -> list[dict]:
+def extract_pdf_text(pdf_path: Path) -> str:
     reader = PdfReader(str(pdf_path))
-    pages_with_text = []
+    pages = []
 
     for i, page in enumerate(reader.pages, start=1):
         try:
@@ -191,23 +168,13 @@ def extract_pdf_pages(pdf_path: Path) -> list[dict]:
         except Exception:
             extracted = ""
 
-        cleaned = clean_text(extracted or "")
-        if cleaned:
-            pages_with_text.append({"page": i, "text": cleaned})
+        if extracted:
+            pages.append(extracted)
 
         if i % 20 == 0:
             print(f"  Read {i} pages from {pdf_path.name}...")
 
-    return pages_with_text
-
-
-def paragraphs_from_pages(pages_with_text: list[dict]) -> list[dict]:
-    paragraphs = []
-    for item in pages_with_text:
-        page_num = item["page"]
-        for paragraph in split_into_paragraphs(item["text"]):
-            paragraphs.append({"page": page_num, "text": paragraph})
-    return paragraphs
+    return clean_text("\n\n".join(pages))
 
 
 def main():
@@ -228,13 +195,14 @@ def main():
         print(f"\nProcessing: {pdf_file.name}")
 
         book_language = detect_book_language(pdf_file.name)
-        pages_with_text = extract_pdf_pages(pdf_file)
-        if not pages_with_text:
+        text = extract_pdf_text(pdf_file)
+
+        if not text:
             print(f"  No extractable text found in {pdf_file.name}")
             continue
 
-        paragraphs_with_pages = paragraphs_from_pages(pages_with_text)
-        semantic_chunks = build_semantic_chunks(paragraphs_with_pages)
+        paragraphs = split_into_paragraphs(text)
+        semantic_chunks = build_semantic_chunks(paragraphs)
 
         print(f"  Created {len(semantic_chunks)} semantic chunks")
 
@@ -247,8 +215,6 @@ def main():
                 "language": book_language,
                 "section_title": chunk["section_title"],
                 "text": chunk["text"],
-                "page_start": chunk.get("page_start"),
-                "page_end": chunk.get("page_end"),
             })
             global_chunk_id += 1
 

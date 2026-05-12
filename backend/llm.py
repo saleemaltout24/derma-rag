@@ -5,23 +5,15 @@ import ollama
 
 def run_llm(prompt: str, model: str | None = None) -> str:
     chosen_model = model or CHAT_MODEL
-
-    # 🔴 DISABLE MODE
-    if chosen_model in [None, "", "none"]:
-        return "LLM disabled — pipeline working"
-
     try:
         response = ollama.chat(
             model=chosen_model,
-            messages=[{"role": "user", "content": prompt}],
-            options={
-                "temperature": 0.2,
-            },
+            messages=[{"role": "user", "content": prompt}]
         )
         return response["message"]["content"].strip()
-
     except Exception as e:
         return f"LLM error: {str(e)}"
+
 def run_json_llm(prompt: str) -> dict[str, Any]:
     raw = run_llm(prompt)
     if raw.lower().startswith("llm error"):

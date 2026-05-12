@@ -194,9 +194,7 @@ def main():
 
                 metadata.append({
                     "image_id": image_id,
-                    "source": pdf_path.name,
                     "source_pdf": pdf_path.name,
-                    "source_stem": pdf_path.stem,
                     "page": page_num + 1,
                     "image_path": str(image_path),
                     "file_name": file_name,
