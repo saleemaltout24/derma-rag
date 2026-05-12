@@ -1,6 +1,9 @@
+import logging
 from typing import Any
 
 from backend.llm import run_json_llm
+
+logger = logging.getLogger(__name__)
 
 
 EXTRACTION_SCHEMA_EXAMPLE = {
@@ -26,15 +29,39 @@ ALLOWED_GOALS = {
 }
 
 
+def _as_optional_str(value: Any) -> str | None:
+    if isinstance(value, str):
+        s = value.strip()
+        return s if s else None
+    return None
+
+
+def _list_of_strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            s = item.strip()
+            if s:
+                out.append(s)
+    return out
+
+
 def extract_structured_state(message: str, history_text: str = "") -> dict[str, Any]:
     prompt = f"""
 You are a structured medical information extractor for a dermatology chatbot.
 
 Extract only information explicitly stated or strongly implied by the user's latest message.
-Use the earlier conversation only when needed to understand short follow-ups.
+Use the earlier conversation when relevant to understand short follow-ups.
 Do not invent facts.
 
-Return valid JSON only.
+Output language (important):
+- Put every human-readable string value in ENGLISH (plain clinical or everyday terms).
+- Translate from Turkish or other languages when needed.
+- The field "question_goal" must be exactly one of the allowed English snake_case literals below, or null.
+
+Return valid JSON only (one object, no markdown fences).
 
 Schema:
 {{
@@ -52,6 +79,7 @@ Examples:
 - "elim çok kaşınıyor" => body_site hand, symptoms itching, question_goal symptom_assessment
 - "alkol içmedim dezenfektan kullandım" => triggers alcohol-based disinfectant, ruled_out drinking alcohol, question_goal cause_assessment
 - "hangi kremi kullanayım" => question_goal product_advice
+- "My scalp has been flaking for a month" => body_site scalp, symptoms flaking, duration one month, question_goal symptom_assessment
 
 Previous conversation:
 {history_text}
@@ -62,24 +90,20 @@ Latest user message:
     data = run_json_llm(prompt)
 
     if "error" in data:
+        logger.warning("state_extractor: extraction failed: %s", data)
         return dict(EXTRACTION_SCHEMA_EXAMPLE)
 
     cleaned = dict(EXTRACTION_SCHEMA_EXAMPLE)
-    cleaned["body_site"] = data.get("body_site")
-    cleaned["duration"] = data.get("duration")
-    cleaned["severity"] = data.get("severity")
+    cleaned["body_site"] = _as_optional_str(data.get("body_site"))
+    cleaned["duration"] = _as_optional_str(data.get("duration"))
+    cleaned["severity"] = _as_optional_str(data.get("severity"))
 
-    symptoms = data.get("symptoms", [])
-    triggers = data.get("triggers", [])
-    ruled_out = data.get("ruled_out", [])
-    notes = data.get("notes", [])
+    cleaned["symptoms"] = _list_of_strings(data.get("symptoms", []))
+    cleaned["triggers"] = _list_of_strings(data.get("triggers", []))
+    cleaned["ruled_out"] = _list_of_strings(data.get("ruled_out", []))
+    cleaned["notes"] = _list_of_strings(data.get("notes", []))
+
     question_goal = data.get("question_goal")
-
-    cleaned["symptoms"] = symptoms if isinstance(symptoms, list) else []
-    cleaned["triggers"] = triggers if isinstance(triggers, list) else []
-    cleaned["ruled_out"] = ruled_out if isinstance(ruled_out, list) else []
-    cleaned["notes"] = notes if isinstance(notes, list) else []
-
     if question_goal in ALLOWED_GOALS:
         cleaned["question_goal"] = question_goal
     else:

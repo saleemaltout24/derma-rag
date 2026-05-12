@@ -110,6 +110,94 @@ def answer_general_help(language: str) -> str:
     return general_help_response(language)
 
 
+# Pre-retrieval slot gates: only when question_goal is set (None => skip gate, e.g. definitional / general questions).
+_GOALS_NEEDING_BODY_AND_SYMPTOMS = frozenset(
+    {"symptom_assessment", "diagnosis_question", "cause_assessment"}
+)
+_GOALS_NEEDING_BODY_OR_SYMPTOMS = frozenset({"treatment_advice"})
+
+
+def _missing_slots_for_gate(state: dict) -> list[str]:
+    """Return ordered list of missing slot names for debug / messaging."""
+    missing: list[str] = []
+    if not state.get("body_site"):
+        missing.append("body_site")
+    symptoms = state.get("symptoms") or []
+    if not symptoms:
+        missing.append("symptoms")
+    return missing
+
+
+def _clarification_for_missing_slots(
+    goal: str | None,
+    missing: list[str],
+    language: str,
+) -> str:
+    need_loc = "body_site" in missing
+    need_sym = "symptoms" in missing
+    if language == "tr":
+        if need_loc and need_sym:
+            return (
+                "Daha iyi yardımcı olabilmem için iki şeye ihtiyacım var: "
+                "Şikayetin vücudun hangi bölgesinde (ör. el, yüz, saçlı deri)? "
+                "Ve ne hissediyorsun (ör. kaşıntı, yanma, pullanma, kızarıklık)?"
+            )
+        if need_loc:
+            return "Şikayetin vücudun hangi bölgesinde olduğunu yazar mısın? (örnek: dirsek, yüz, ayak tabanı)"
+        return "Hangi belirtileri yaşıyorsun? (örnek: kaşıntı, kızarıklık, pullanma, ağrı)"
+    if need_loc and need_sym:
+        return (
+            "To help properly I need two things: where on your body is the problem "
+            "(e.g. hand, face, scalp)? And what are you feeling (e.g. itch, burn, scale, redness)?"
+        )
+    if need_loc:
+        return "Where on your body is this happening? (e.g. elbow, face, sole of the foot)"
+    return "What symptoms are you having? (e.g. itch, redness, flaking, pain)"
+
+
+def _should_skip_retrieval_for_slots(state: dict) -> tuple[bool, list[str]]:
+    """
+    If True, skip FAISS + answer LLM and return a single clarification message instead.
+    """
+    goal = state.get("question_goal")
+    if goal is None:
+        return False, []
+
+    body_ok = bool(state.get("body_site"))
+    sym_ok = bool(state.get("symptoms"))
+
+    if goal in _GOALS_NEEDING_BODY_AND_SYMPTOMS:
+        if body_ok and sym_ok:
+            return False, []
+        return True, _missing_slots_for_gate(state)
+
+    if goal in _GOALS_NEEDING_BODY_OR_SYMPTOMS:
+        if body_ok or sym_ok:
+            return False, []
+        return True, _missing_slots_for_gate(state)
+
+    return False, []
+
+
+def _skipped_retrieval_debug(
+    question_goal: str | None,
+    missing: list[str],
+) -> dict:
+    return {
+        "skipped_retrieval": True,
+        "reason": "missing_structured_slots",
+        "question_goal": question_goal,
+        "missing": missing,
+        "query": None,
+        "retrieve_top_k": RETRIEVE_TOP_K,
+        "rerank_top_k": RERANK_TOP_K,
+        "enable_rerank": ENABLE_RERANK,
+        "retrieved_count": 0,
+        "selected_count": 0,
+        "selected_sources": [],
+    }
+
+
 def answer_medical_question(
     question: str,
     history: list,
@@ -121,6 +209,16 @@ def answer_medical_question(
 
     extracted = extract_structured_state(question, history_text)
     updated_state = merge_state(current_state, extracted)
+
+    skip, missing = _should_skip_retrieval_for_slots(updated_state)
+    if skip:
+        msg = _clarification_for_missing_slots(
+            updated_state.get("question_goal"),
+            missing,
+            language,
+        )
+        debug = _skipped_retrieval_debug(updated_state.get("question_goal"), missing)
+        return msg, updated_state, debug
 
     search_query = build_search_query(question, updated_state, language)
     retrieved_raw = search(search_query, k=RETRIEVE_TOP_K)

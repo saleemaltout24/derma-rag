@@ -10,6 +10,8 @@ from backend.config import DEBUG_PAYLOADS, UPLOAD_DIR
 from backend.intent_router import (
     classify_user_intent,
     general_help_response,
+    greeting_response,
+    is_greeting,
     out_of_scope_response,
 )
 from backend.rag_pipeline import answer_medical_question, detect_language
@@ -104,7 +106,11 @@ async def chat(
 
         if intent == "GENERAL_HELP" and not file:
             current_language = session_languages.get(session_id) or detect_language(question)
-            answer = general_help_response(current_language)
+            answer = (
+                greeting_response(current_language)
+                if is_greeting(question)
+                else general_help_response(current_language)
+            )
 
             history.append({"role": "user", "content": question})
             history.append({"role": "assistant", "content": answer})
@@ -235,7 +241,11 @@ def ask(question: str, session_id: str = "default"):
 
         elif intent == "GENERAL_HELP":
             current_language = session_languages.get(session_id) or detect_language(question)
-            answer = general_help_response(current_language)
+            answer = (
+                greeting_response(current_language)
+                if is_greeting(question)
+                else general_help_response(current_language)
+            )
 
         elif intent == "OUT_OF_SCOPE":
             reply_lang = session_languages.get(session_id) or detect_language(question)

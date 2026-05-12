@@ -1,4 +1,62 @@
+import random
+import re
+
 from backend.llm import run_llm
+
+
+GREETING_TOKENS = frozenset(
+    {
+        "hello",
+        "hi",
+        "hey",
+        "hiya",
+        "yo",
+        "howdy",
+        "sup",
+        "selam",
+        "merhaba",
+        "meraba",
+        "günaydın",
+        "gunaydin",
+        "iyigünler",
+        "iyigunler",
+        "sa",
+        "slm",
+    }
+)
+
+GREETING_FILLERS = frozenset(
+    {
+        "there",
+        "again",
+        "you",
+        "u",
+        "everyone",
+        "guys",
+        "folks",
+        "team",
+        "mate",
+        "dostum",
+        "abi",
+        "all",
+    }
+)
+
+# If the user is clearly asking for capabilities, use help text not a short greeting.
+_CAPABILITY_SUBSTRINGS = (
+    "what can",
+    "who are you",
+    "how do you",
+    "how does this",
+    "tell me about",
+    "capabilities",
+    "what do you",
+    "ne yapabil",
+    "neler yap",
+    "kim",
+    "nasıl çalış",
+    "nasil calis",
+)
 
 
 ALLOWED_INTENTS = {
@@ -16,15 +74,27 @@ You are an intent router for a dermatology assistant.
 
 Classify the user's message into EXACTLY ONE label:
 
-- GENERAL_HELP → asking what the assistant does, capabilities, who you are
+- GENERAL_HELP → short greetings (hi, hello) OR asking what the assistant does / capabilities / who you are
 - LANGUAGE_CHANGE_TR → user wants answers in Turkish from now on (e.g. Türkçe, Turkish)
 - LANGUAGE_CHANGE_EN → user wants answers in English from now on (e.g. English, in English)
 - MEDICAL_QUESTION → about skin, scalp, nails, hair on scalp, rash, itch, lesions, acne, eczema, etc.
 - OUT_OF_SCOPE → NOT dermatology (e.g. brain, heart, bones, internal medicine, unrelated topics)
 
+The system should allow ALL dermatology-related concepts, including:
+
+- skin conditions (acne, eczema, psoriasis)
+- lesions, moles, tumors (melanoma, BCC)
+- symptoms (itching, redness, rash)
+- infections (fungal, bacterial, viral on skin)
+- cosmetic skin concerns
+- treatments and products
+
+The system should block:
+- non-dermatology organs
+- unrelated diseases 
+
 IMPORTANT RULES:
-- If the message is NOT clearly about skin, scalp, or nails → OUT_OF_SCOPE
-- If unsure whether it is dermatology → OUT_OF_SCOPE
+- If the message is NOT clearly about the listed concepts → OUT_OF_SCOPE
 - Be strict. Do NOT guess.
 
 Return ONLY the label. No explanation.
@@ -42,18 +112,50 @@ Label:
     return "OUT_OF_SCOPE"
 
 
+def is_greeting(message: str) -> bool:
+    """
+    True for short, greeting-only messages (no extra LLM).
+    Uses whole-word tokens so substrings like "hi" inside "this" do not match.
+    """
+    t = (message or "").lower().strip()
+    if not t or len(t) > 120:
+        return False
+    if any(s in t for s in _CAPABILITY_SUBSTRINGS):
+        return False
+    tokens = re.findall(r"[a-zçğıöşü]+", t)
+    if not tokens or len(tokens) > 5:
+        return False
+    if not any(tok in GREETING_TOKENS for tok in tokens):
+        return False
+    return all(tok in GREETING_TOKENS or tok in GREETING_FILLERS for tok in tokens)
+
+
+def greeting_response(language: str) -> str:
+    if language == "tr":
+        choices = (
+            "Merhaba! Bugün cildiniz, saçlı deriniz veya tırnaklarınızla ilgili nasıl yardımcı olabilirim?",
+            "Selam! Hangi cilt sorununu konuşmak istersiniz?",
+            "Merhaba, buyurun — kaşıntı, döküntü veya lezyon gibi konularda sorabilirsiniz.",
+        )
+    else:
+        choices = (
+            "Hi! How can I help with your skin today?",
+            "Hey — what skin concern would you like to talk about?",
+            "Hello! Feel free to ask about rashes, itching, acne, or other skin, scalp, or nail questions.",
+        )
+    return random.choice(choices)
+
+
 def general_help_response(language: str) -> str:
     if language == "tr":
         return (
-            "Ben bir dermatoloji asistanıyım. Cilt, saçlı deri ve tırnaklarla ilgili sorular sorabilirsiniz. "
-            "Kaşıntı, kızarıklık, kepek, akne, egzama, sedef, mantar, döküntü ve temel cilt bakımı hakkında yardımcı olabilirim. "
-            "İsterseniz cilt fotoğrafı da yükleyebilirsiniz."
+            "Cilt, saçlı deri ve tırnak konularında yardımcı olabilirim: akne, egzama, kaşıntı, döküntü, mantar enfeksiyonları gibi. "
+            "İsterseniz bir fotoğraf da yükleyebilirsiniz."
         )
 
     return (
-        "I am a dermatology assistant. You can ask about skin, scalp, and nail problems. "
-        "I can help with itching, redness, dandruff, acne, eczema, psoriasis, fungal infections, rashes, "
-        "and basic skin care. You can also optionally upload a skin image to help me better understand your condition."
+        "I can help with skin, scalp, and nail concerns — for example acne, rashes, irritation, or infections on the skin. "
+        "You can also upload a photo if that helps."
     )
 
 
