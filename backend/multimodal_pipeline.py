@@ -187,7 +187,12 @@ def answer_multimodal_question(
     image_description = analyze_skin_image(image_path)
     text_query = build_search_query(question or image_description, updated_state, language)
     retrieved_text_docs = search_text(text_query, k=RETRIEVE_TOP_K)
-    text_docs = rerank_docs(text_query, retrieved_text_docs, k=RERANK_TOP_K)
+    text_docs = rerank_docs(
+        text_query,
+        retrieved_text_docs,
+        k=RERANK_TOP_K,
+        user_question=question or "",
+    )
 
     allowed_source_pages = collect_source_pages(text_docs)
     image_matches = search_similar_images(

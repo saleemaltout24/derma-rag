@@ -30,8 +30,10 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "mistral:7b")
 VISION_MODEL = os.getenv("VISION_MODEL", "llama3.2-vision")
 CLIP_MODEL = os.getenv("CLIP_MODEL", "openai/clip-vit-base-patch32")
 HARDWARE_PROFILE = os.getenv("HARDWARE_PROFILE", "cpu").lower()
-RETRIEVE_TOP_K = int(os.getenv("RETRIEVE_TOP_K", "6"))
-RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "3"))
+# FAISS: wide recall; cross-encoder rerank: narrow precision. If k is too small, the
+# right passage may never enter the rerank pool (no amount of reranking fixes that).
+RETRIEVE_TOP_K = int(os.getenv("RETRIEVE_TOP_K", "20"))
+RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "5"))
 RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 ENABLE_RERANK = os.getenv("ENABLE_RERANK", "true").lower() == "true"
 ENABLE_CLASSIFIER = os.getenv("ENABLE_CLASSIFIER", "false").lower() == "true"

@@ -1,3 +1,5 @@
+import re
+
 from lingua import Language, LanguageDetectorBuilder
 from sentence_transformers import CrossEncoder
 
@@ -48,21 +50,188 @@ def format_user_history(history: list, max_turns: int = 8) -> str:
     return "\n".join(lines)
 
 
-def definition_priority(text: str) -> int:
-    """Integer tie-breaker for definitional chunks. Never mixed into FAISS L2 distance."""
-    t = text.lower()
+_DEF_FOCUS_EN = re.compile(
+    r"\b(?:what\s+is|what\'?s|define|definition\s+of|meaning\s+of)\s+(?:the\s+)?(.+?)\s*\??\s*$",
+    re.I,
+)
+_DEF_FOCUS_TR = re.compile(r"^(.+?)\s+nedir\s*\??\s*$", re.I)
+
+
+def extract_definition_focus(user_question: str) -> str | None:
+    """Trailing noun phrase from definitional questions, e.g. 'What is acne?' -> 'acne'."""
+    q = (user_question or "").strip().lower()
+    if not q:
+        return None
+    m = _DEF_FOCUS_EN.search(q)
+    if m:
+        focus = m.group(1).strip()
+    else:
+        m = _DEF_FOCUS_TR.match(q)
+        if not m:
+            return None
+        focus = m.group(1).strip()
+    focus = re.sub(r"^the\s+", "", focus).rstrip("?.! ")
+    if len(focus) < 2 or focus in {"skin", "this", "that", "it", "bu"}:
+        return None
+    if any(x in focus for x in (" and ", " vs ", " versus ", " ve ", " ile ")):
+        return None
+    return focus
+
+
+def chunk_matches_definition_focus(focus: str, text: str) -> bool:
+    """True if every meaningful token in *focus* appears as a whole word in *text*."""
+    if not focus or not text:
+        return False
+    t = (text or "").lower()
+    tokens = [p for p in re.split(r"\s+", focus.strip().lower()) if len(p) >= 2]
+    if not tokens:
+        tokens = [focus.strip().lower()]
+    for tok in tokens:
+        if len(tok) == 2 and not tok.isalpha():
+            continue
+        if not re.search(rf"\b{re.escape(tok)}\b", t, re.I):
+            return False
+    return True
+
+
+def refine_docs_for_definition_retrieval(
+    question: str,
+    retrieved_docs: list[dict],
+    retrieve_k: int,
+) -> list[dict]:
+    """
+    Hybrid recall: dense retrieval often misses the right entity; for definitional
+    questions, prefer chunks that literally contain the asked concept, and optionally
+    run a second dense query focused on that concept.
+    """
+    if not retrieved_docs or not looks_like_definition_question(question):
+        return retrieved_docs
+    focus = extract_definition_focus(question)
+    if not focus:
+        return retrieved_docs
+
+    def _sort_by_distance(ds: list[dict]) -> list[dict]:
+        out = [dict(d) for d in ds]
+        out.sort(key=lambda d: float(d.get("distance", d.get("score", 0.0))))
+        return out
+
+    def _matches(ds: list[dict]) -> list[dict]:
+        return [d for d in ds if chunk_matches_definition_focus(focus, d.get("text", ""))]
+
+    hits = _matches(retrieved_docs)
+    if len(hits) >= 3:
+        return _sort_by_distance(hits)[:retrieve_k]
+
+    booster = f"{focus} dermatology clinical pathogenesis diagnosis"
+    try:
+        raw_extra = search(booster, k=retrieve_k)
+        extra = clean_docs_for_retrieval(raw_extra)
+        if not extra:
+            extra = list(raw_extra)
+    except Exception:
+        extra = []
+
+    seen: set[tuple] = set()
+    merged: list[dict] = []
+    for pool in (retrieved_docs, extra):
+        for d in pool:
+            key = (
+                d.get("source"),
+                d.get("page_start"),
+                d.get("page_end"),
+                (d.get("text") or "")[:240],
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(dict(d))
+
+    hits2 = _matches(merged)
+    if hits2:
+        return _sort_by_distance(hits2)[:retrieve_k]
+    if hits:
+        return _sort_by_distance(hits)[:retrieve_k]
+    return retrieved_docs
+
+
+def topic_alignment_adjustment(user_question: str, chunk_text: str) -> int:
+    """
+    Downrank passages whose *primary* topic conflicts with a definitional focus
+    (e.g. rosacea chapter hits 'acne rosacea' + 'definition' for 'What is acne?').
+    """
+    focus = extract_definition_focus(user_question)
+    if not focus:
+        return 0
+    q_lower = user_question.lower()
+    t = (chunk_text or "").lower()
+    focus_l = focus.lower()
+
+    acne_focus = focus_l in (
+        "acne",
+        "akne",
+        "akne vulgarisi",
+        "akne vulgaris",
+    ) or focus_l.startswith(("acne ", "akne "))
+    if acne_focus and "rosacea" not in q_lower:
+        has_vulgaris = bool(re.search(r"\bacne\s+vulgaris\b", t))
+        if has_vulgaris:
+            return 6
+        ros_hits = len(re.findall(r"\brosacea\b", t))
+        has_acne_rosacea = "acne rosacea" in t
+        acne_primary = bool(
+            re.search(r"\bcomedo", t)
+            or "pilosebaceous" in t
+            or "sebaceous gland" in t
+            or "p. acnes" in t
+            or "propionibacterium" in t
+        )
+        if ros_hits >= 2 and (has_acne_rosacea or ros_hits >= 4) and not has_vulgaris:
+            if not acne_primary:
+                return -20
+        if ros_hits >= 4 and not has_vulgaris and not acne_primary:
+            return -12
+
+    return 0
+
+
+def _definition_priority_lexical(text: str) -> int:
+    """Lexical tie-breaker for definitional prose (not query-aware)."""
+    t = (text or "").lower()
     padded = f" {t} "
     score = 0
-    if " is a " in padded or " is an " in padded:
-        score += 2
-    if "defined as" in t:
-        score += 2
+
+    if " is a " in padded:
+        score += 3
+    if " is an " in padded:
+        score += 3
     if "refers to" in t:
-        score += 2
+        score += 3
+    if "defined as" in t:
+        score += 3
     if "definition" in t:
         score += 2
+
     if " nedir" in padded or " tanımlanır" in t or " olarak bilinir" in t:
         score += 2
+
+    domain_hits = sum(
+        1 for w in ("chronic", "inflammatory", "condition", "disease") if w in t
+    )
+    score += min(domain_hits, 2)
+
+    if " figure " in padded or t.lstrip().startswith("figure "):
+        score -= 2
+    if t.count(",") > 25 and "chapter" in t:
+        score -= 3
+
+    return score
+
+
+def definition_priority(text: str, user_question: str | None = None) -> int:
+    """Definitional chunk score: lexical cues plus query–passage topic alignment."""
+    score = _definition_priority_lexical(text)
+    if user_question:
+        score += topic_alignment_adjustment(user_question, text)
     return score
 
 
@@ -238,12 +407,23 @@ def answer_medical_question(
     if not retrieved_docs:
         retrieved_docs = list(retrieved_raw)
 
+    retrieved_docs = refine_docs_for_definition_retrieval(
+        question,
+        retrieved_docs,
+        RETRIEVE_TOP_K,
+    )
+
     print("\n===== RETRIEVED DOCS =====")
     for doc in retrieved_docs[:3]:
         print(doc.get("text", "")[:300])
         print("-----")
 
-    docs = rerank_docs(search_query, retrieved_docs, k=RERANK_TOP_K)
+    docs = rerank_docs(
+        search_query,
+        retrieved_docs,
+        k=RERANK_TOP_K,
+        user_question=question,
+    )
 
     print("\n===== RERANKED DOC SCORES (top 5) =====")
     for doc in docs[:5]:
@@ -286,9 +466,18 @@ def answer_medical_question(
     return answer, updated_state, debug
 
 
-def rerank_docs(query: str, docs: list[dict], k: int) -> list[dict]:
+def rerank_docs(
+    query: str,
+    docs: list[dict],
+    k: int,
+    user_question: str | None = None,
+) -> list[dict]:
     if not docs:
         return docs
+
+    uq = (user_question or "").strip()
+    uq_for_priority = uq if uq else None
+    ce_query = uq if uq and looks_like_definition_question(uq) else query
 
     def _faiss_distance(d: dict) -> float:
         return float(d.get("distance", d.get("score", 0.0)))
@@ -296,7 +485,10 @@ def rerank_docs(query: str, docs: list[dict], k: int) -> list[dict]:
     if not ENABLE_RERANK:
         boosted = [dict(doc) for doc in docs]
         for item in boosted:
-            item["definition_priority"] = definition_priority(item.get("text", ""))
+            item["definition_priority"] = definition_priority(
+                item.get("text", ""),
+                uq_for_priority,
+            )
         boosted.sort(key=lambda d: (-d["definition_priority"], _faiss_distance(d)))
         return boosted[:k]
 
@@ -307,17 +499,23 @@ def rerank_docs(query: str, docs: list[dict], k: int) -> list[dict]:
         except Exception:
             boosted = [dict(doc) for doc in docs]
             for item in boosted:
-                item["definition_priority"] = definition_priority(item.get("text", ""))
+                item["definition_priority"] = definition_priority(
+                    item.get("text", ""),
+                    uq_for_priority,
+                )
             boosted.sort(key=lambda d: (-d["definition_priority"], _faiss_distance(d)))
             return boosted[:k]
 
-    pairs = [(query, doc.get("text", "")) for doc in docs]
+    pairs = [(ce_query, doc.get("text", "")) for doc in docs]
     try:
         scores = reranker.predict(pairs)
     except Exception:
         boosted = [dict(doc) for doc in docs]
         for item in boosted:
-            item["definition_priority"] = definition_priority(item.get("text", ""))
+            item["definition_priority"] = definition_priority(
+                item.get("text", ""),
+                uq_for_priority,
+            )
         boosted.sort(key=lambda d: (-d["definition_priority"], _faiss_distance(d)))
         return boosted[:k]
 
@@ -325,10 +523,19 @@ def rerank_docs(query: str, docs: list[dict], k: int) -> list[dict]:
     for doc, score in zip(docs, scores):
         item = dict(doc)
         item["rerank_score"] = float(score)
-        item["definition_priority"] = definition_priority(item.get("text", ""))
+        item["definition_priority"] = definition_priority(
+            item.get("text", ""),
+            uq_for_priority,
+        )
         reranked.append(item)
 
-    reranked.sort(key=lambda d: (-d["definition_priority"], -d["rerank_score"]))
+    reranked.sort(
+        key=lambda d: (
+            -d["definition_priority"],
+            -d.get("rerank_score", 0.0),
+            _faiss_distance(d),
+        )
+    )
     return reranked[:k]
 
 

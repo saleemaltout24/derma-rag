@@ -67,44 +67,67 @@ def merge_state(current: dict[str, Any], update: dict[str, Any]) -> dict[str, An
 
 
 def build_search_query(user_message: str, state: dict[str, Any], language: str) -> str:
-    q = user_message.strip()
-    if looks_like_definition_question(q):
-        if language == "tr":
-            q_for_search = f"tanım dermatoloji {q}"
-        else:
-            q_for_search = f"definition dermatology {q}"
-    else:
-        q_for_search = q
+    """
+    One-line semantic query for embedding / FAISS. Avoids labeled lines like
+    "Current question:" / "Goal:" — those add little semantic signal and dilute the vector.
+    """
+    parts: list[str] = []
+    seen: set[str] = set()
 
-    lines = [f"Current question: {q_for_search}"]
+    def add(s: str) -> None:
+        t = (s or "").strip()
+        if not t:
+            return
+        key = t.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        parts.append(t)
+
+    q_raw = user_message.strip()
+    q = q_raw.lower() if q_raw else ""
+
+    if looks_like_definition_question(q_raw):
+        if language == "tr":
+            add("tanım dermatoloji")
+        else:
+            add("definition dermatology")
+
+    if q:
+        add(q)
+    else:
+        add("dermatology")
 
     if state.get("body_site"):
-        lines.append(f"Body site: {state['body_site']}")
+        add(str(state["body_site"]))
 
-    if state.get("symptoms"):
-        lines.append("Symptoms: " + ", ".join(state["symptoms"]))
-
-    if state.get("triggers"):
-        lines.append("Triggers: " + ", ".join(state["triggers"]))
+    for x in (state.get("symptoms") or [])[:10]:
+        add(str(x))
+    for x in (state.get("triggers") or [])[:8]:
+        add(str(x))
+    for x in (state.get("ruled_out") or [])[:5]:
+        add(str(x))
 
     if state.get("duration"):
-        lines.append(f"Duration: {state['duration']}")
-
+        add(str(state["duration"]))
     if state.get("severity"):
-        lines.append(f"Severity: {state['severity']}")
+        add(str(state["severity"]))
 
-    if state.get("ruled_out"):
-        lines.append("Ruled out: " + ", ".join(state["ruled_out"]))
+    goal = state.get("question_goal")
+    if goal == "treatment_advice":
+        add("treatment")
+    elif goal == "cause_assessment":
+        add("causes")
+    elif goal == "symptom_assessment":
+        add("symptoms")
+    elif goal == "product_advice":
+        add("skincare product")
+    elif goal == "diagnosis_question":
+        add("diagnosis")
+    elif goal == "prevention_advice":
+        add("prevention")
 
-    if state.get("question_goal"):
-        lines.append(f"Goal: {state['question_goal']}")
-
-    if language == "tr":
-        lines.append("Language: Turkish")
-    else:
-        lines.append("Language: English")
-
-    return "\n".join(lines)
+    return " ".join(parts)
 
 
 def format_state_for_prompt(state: dict[str, Any]) -> str:
