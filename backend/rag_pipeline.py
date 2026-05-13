@@ -15,8 +15,10 @@ from backend.state_extractor import extract_structured_state
 from backend.state_manager import (
     build_search_query,
     create_empty_state,
+    extract_definition_focus,
     format_state_for_prompt,
     looks_like_definition_question,
+    maybe_expand_referential_question,
     merge_state,
 )
 from backend.vector_store import search
@@ -48,34 +50,6 @@ def format_user_history(history: list, max_turns: int = 8) -> str:
             lines.append(f"{role.title()}: {content}")
 
     return "\n".join(lines)
-
-
-_DEF_FOCUS_EN = re.compile(
-    r"\b(?:what\s+is|what\'?s|define|definition\s+of|meaning\s+of)\s+(?:the\s+)?(.+?)\s*\??\s*$",
-    re.I,
-)
-_DEF_FOCUS_TR = re.compile(r"^(.+?)\s+nedir\s*\??\s*$", re.I)
-
-
-def extract_definition_focus(user_question: str) -> str | None:
-    """Trailing noun phrase from definitional questions, e.g. 'What is acne?' -> 'acne'."""
-    q = (user_question or "").strip().lower()
-    if not q:
-        return None
-    m = _DEF_FOCUS_EN.search(q)
-    if m:
-        focus = m.group(1).strip()
-    else:
-        m = _DEF_FOCUS_TR.match(q)
-        if not m:
-            return None
-        focus = m.group(1).strip()
-    focus = re.sub(r"^the\s+", "", focus).rstrip("?.! ")
-    if len(focus) < 2 or focus in {"skin", "this", "that", "it", "bu"}:
-        return None
-    if any(x in focus for x in (" and ", " vs ", " versus ", " ve ", " ile ")):
-        return None
-    return focus
 
 
 def chunk_matches_definition_focus(focus: str, text: str) -> bool:
@@ -382,7 +356,13 @@ def answer_medical_question(
     language = forced_language if forced_language else detect_language(question)
     history_text = format_user_history(history)
 
-    extracted = extract_structured_state(question, history_text)
+    working_question = maybe_expand_referential_question(
+        question,
+        history,
+        current_state,
+    )
+
+    extracted = extract_structured_state(working_question, history_text)
     if looks_like_definition_question(question):
         # New definitional turn should not inherit prior symptom slots / question_goal.
         updated_state = merge_state(create_empty_state(), extracted)
@@ -392,6 +372,12 @@ def answer_medical_question(
     skip, missing = (False, [])
     if not looks_like_definition_question(question):
         skip, missing = _should_skip_retrieval_for_slots(updated_state)
+    if (
+        skip
+        and working_question.strip() != (question or "").strip()
+    ):
+        skip, missing = False, []
+
     if skip:
         msg = _clarification_for_missing_slots(
             updated_state.get("question_goal"),
@@ -401,14 +387,14 @@ def answer_medical_question(
         debug = _skipped_retrieval_debug(updated_state.get("question_goal"), missing)
         return msg, updated_state, debug
 
-    search_query = build_search_query(question, updated_state, language)
+    search_query = build_search_query(working_question, updated_state, language)
     retrieved_raw = search(search_query, k=RETRIEVE_TOP_K)
     retrieved_docs = clean_docs_for_retrieval(retrieved_raw)
     if not retrieved_docs:
         retrieved_docs = list(retrieved_raw)
 
     retrieved_docs = refine_docs_for_definition_retrieval(
-        question,
+        working_question,
         retrieved_docs,
         RETRIEVE_TOP_K,
     )
@@ -422,7 +408,7 @@ def answer_medical_question(
         search_query,
         retrieved_docs,
         k=RERANK_TOP_K,
-        user_question=question,
+        user_question=working_question,
     )
 
     print("\n===== RERANKED DOC SCORES (top 5) =====")
@@ -436,7 +422,7 @@ def answer_medical_question(
     if goal == "product_advice":
         prompt = build_product_prompt(
             context=context,
-            question=question,
+            question=working_question,
             history=history_text,
             structured_state=structured_state_text,
             language=language,
@@ -444,7 +430,7 @@ def answer_medical_question(
     elif goal == "treatment_advice":
         prompt = build_treatment_prompt(
             context=context,
-            question=question,
+            question=working_question,
             history=history_text,
             structured_state=structured_state_text,
             language=language,
@@ -452,7 +438,7 @@ def answer_medical_question(
     else:
         prompt = build_medical_prompt(
             context=context,
-            question=question,
+            question=working_question,
             history=history_text,
             structured_state=structured_state_text,
             language=language,

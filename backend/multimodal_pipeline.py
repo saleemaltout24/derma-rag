@@ -4,7 +4,7 @@ from backend.image_pipeline import analyze_skin_image
 from backend.image_vector_store import search_similar_images
 from backend.rag_pipeline import detect_language, format_user_history, rerank_docs
 from backend.state_extractor import extract_structured_state
-from backend.state_manager import merge_state, build_search_query, format_state_for_prompt
+from backend.state_manager import merge_state, build_search_query, format_state_for_prompt, maybe_expand_referential_question
 from backend.vector_store import search as search_text
 from backend.llm import run_llm
 
@@ -181,17 +181,23 @@ def answer_multimodal_question(
     language = forced_language if forced_language else detect_language(question or "")
     history_text = format_user_history(history)
 
-    extracted = extract_structured_state(question or "", history_text)
+    working_question = maybe_expand_referential_question(
+        question or "",
+        history,
+        current_state,
+    )
+
+    extracted = extract_structured_state(working_question, history_text)
     updated_state = merge_state(current_state, extracted)
 
     image_description = analyze_skin_image(image_path)
-    text_query = build_search_query(question or image_description, updated_state, language)
+    text_query = build_search_query(working_question or image_description, updated_state, language)
     retrieved_text_docs = search_text(text_query, k=RETRIEVE_TOP_K)
     text_docs = rerank_docs(
         text_query,
         retrieved_text_docs,
         k=RERANK_TOP_K,
-        user_question=question or "",
+        user_question=working_question or "",
     )
 
     allowed_source_pages = collect_source_pages(text_docs)
@@ -209,7 +215,7 @@ def answer_multimodal_question(
     classifier_context = format_classifier_context(classifier_result)
 
     prompt = build_multimodal_prompt(
-        question=question or "",
+        question=working_question or "",
         history_text=history_text,
         structured_state=structured_state_text,
         image_description=image_description,

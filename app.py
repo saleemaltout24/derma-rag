@@ -18,7 +18,7 @@ from backend.intent_router import (
 from backend.rag_pipeline import answer_medical_question, detect_language
 from backend.multimodal_pipeline import answer_multimodal_question
 from backend.session_store import load_session_data, persist_session_data, reset_session_data
-from backend.state_manager import create_empty_state
+from backend.state_manager import create_empty_state, is_referential_followup
 
 app = FastAPI(title="Dermatology RAG Chatbot")
 
@@ -71,7 +71,9 @@ async def chat(
         state = get_or_create_state(session_id)
 
         if question:
-            if is_probable_slot_followup(question, history, state):
+            if is_probable_slot_followup(question, history, state) or is_referential_followup(
+                question, history, state
+            ):
                 intent = "FOLLOW_UP"
             else:
                 intent = classify_user_intent(question)
@@ -233,7 +235,10 @@ def ask(question: str, session_id: str = "default"):
         state = get_or_create_state(session_id)
         retrieval_debug = {}
 
-        if question and is_probable_slot_followup(question, history, state):
+        if question and (
+            is_probable_slot_followup(question, history, state)
+            or is_referential_followup(question, history, state)
+        ):
             intent = "FOLLOW_UP"
         else:
             intent = classify_user_intent(question)
