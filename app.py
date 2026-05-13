@@ -12,6 +12,7 @@ from backend.intent_router import (
     general_help_response,
     greeting_response,
     is_greeting,
+    is_probable_slot_followup,
     out_of_scope_response,
 )
 from backend.rag_pipeline import answer_medical_question, detect_language
@@ -70,7 +71,10 @@ async def chat(
         state = get_or_create_state(session_id)
 
         if question:
-            intent = classify_user_intent(question)
+            if is_probable_slot_followup(question, history, state):
+                intent = "FOLLOW_UP"
+            else:
+                intent = classify_user_intent(question)
         else:
             intent = "MEDICAL_QUESTION"
 
@@ -195,7 +199,7 @@ async def chat(
 
         return {
             "session_id": session_id,
-            "intent": "MEDICAL_QUESTION",
+            "intent": intent,
             "answer": answer,
             "structured_state": session_state[session_id],
             "history": history,
@@ -229,7 +233,10 @@ def ask(question: str, session_id: str = "default"):
         state = get_or_create_state(session_id)
         retrieval_debug = {}
 
-        intent = classify_user_intent(question)
+        if question and is_probable_slot_followup(question, history, state):
+            intent = "FOLLOW_UP"
+        else:
+            intent = classify_user_intent(question)
 
         if intent == "LANGUAGE_CHANGE_TR":
             session_languages[session_id] = "tr"

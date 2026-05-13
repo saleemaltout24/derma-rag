@@ -10,7 +10,13 @@ from backend.prompt_template import (
     build_treatment_prompt,
 )
 from backend.state_extractor import extract_structured_state
-from backend.state_manager import build_search_query, format_state_for_prompt, merge_state
+from backend.state_manager import (
+    build_search_query,
+    create_empty_state,
+    format_state_for_prompt,
+    looks_like_definition_question,
+    merge_state,
+)
 from backend.vector_store import search
 
 languages = [Language.ENGLISH, Language.TURKISH]
@@ -208,9 +214,15 @@ def answer_medical_question(
     history_text = format_user_history(history)
 
     extracted = extract_structured_state(question, history_text)
-    updated_state = merge_state(current_state, extracted)
+    if looks_like_definition_question(question):
+        # New definitional turn should not inherit prior symptom slots / question_goal.
+        updated_state = merge_state(create_empty_state(), extracted)
+    else:
+        updated_state = merge_state(current_state, extracted)
 
-    skip, missing = _should_skip_retrieval_for_slots(updated_state)
+    skip, missing = (False, [])
+    if not looks_like_definition_question(question):
+        skip, missing = _should_skip_retrieval_for_slots(updated_state)
     if skip:
         msg = _clarification_for_missing_slots(
             updated_state.get("question_goal"),

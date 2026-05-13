@@ -80,6 +80,7 @@ Examples:
 - "alkol içmedim dezenfektan kullandım" => triggers alcohol-based disinfectant, ruled_out drinking alcohol, question_goal cause_assessment
 - "hangi kremi kullanayım" => question_goal product_advice
 - "My scalp has been flaking for a month" => body_site scalp, symptoms flaking, duration one month, question_goal symptom_assessment
+- "What is acne?" => question_goal general_dermatology (concept / definition; no personal body site required)
 
 Previous conversation:
 {history_text}

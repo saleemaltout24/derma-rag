@@ -44,17 +44,19 @@ def _merge_unique_list(old: list[str], new: list[str]) -> list[str]:
 def merge_state(current: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
     merged = dict(current)
 
-    if update.get("body_site"):
-        merged["body_site"] = update["body_site"]
+    # Scalar slots: allow extractor to clear with null (truthy-only updates used to
+    # leave stale question_goal across turns, e.g. vague symptom → "what is acne").
+    if "body_site" in update:
+        merged["body_site"] = update.get("body_site") or None
 
-    if update.get("duration"):
-        merged["duration"] = update["duration"]
+    if "duration" in update:
+        merged["duration"] = update.get("duration") or None
 
-    if update.get("severity"):
-        merged["severity"] = update["severity"]
+    if "severity" in update:
+        merged["severity"] = update.get("severity") or None
 
-    if update.get("question_goal"):
-        merged["question_goal"] = update["question_goal"]
+    if "question_goal" in update:
+        merged["question_goal"] = update.get("question_goal")
 
     merged["symptoms"] = _merge_unique_list(current.get("symptoms", []), update.get("symptoms", []))
     merged["triggers"] = _merge_unique_list(current.get("triggers", []), update.get("triggers", []))

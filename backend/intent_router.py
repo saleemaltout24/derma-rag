@@ -1,5 +1,6 @@
 import random
 import re
+from typing import Any
 
 from backend.llm import run_llm
 
@@ -66,6 +67,124 @@ ALLOWED_INTENTS = {
     "MEDICAL_QUESTION",
     "OUT_OF_SCOPE",
 }
+
+
+def is_probable_slot_followup(
+    message: str,
+    history: list[dict],
+    current_state: dict[str, Any],
+) -> bool:
+    """
+    Short replies that fill missing body_site / symptoms after a slot clarification,
+    without calling the LLM intent router (which has no history and mislabels e.g. "on my face").
+    """
+    msg = (message or "").strip().lower()
+    if not msg:
+        return False
+    words = msg.split()
+    if len(words) > 8:
+        return False
+    if not history or history[-1].get("role") != "assistant":
+        return False
+
+    goal = current_state.get("question_goal")
+    if goal not in {
+        "symptom_assessment",
+        "diagnosis_question",
+        "cause_assessment",
+        "treatment_advice",
+    }:
+        return False
+
+    has_body = bool(current_state.get("body_site"))
+    has_sym = bool(current_state.get("symptoms"))
+
+    if goal in ("symptom_assessment", "diagnosis_question", "cause_assessment"):
+        if has_body and has_sym:
+            return False
+    elif goal == "treatment_advice":
+        if has_body and has_sym:
+            return False
+
+    locationish = (
+        msg.startswith("on ")
+        or msg.startswith("my ")
+        or msg.startswith("in ")
+        or msg.startswith("the ")
+        or " on my " in msg
+        or msg.startswith("on my")
+        or any(
+            w in msg
+            for w in (
+                "face",
+                "scalp",
+                "arm",
+                "arms",
+                "hand",
+                "hands",
+                "leg",
+                "legs",
+                "foot",
+                "feet",
+                "back",
+                "chest",
+                "neck",
+                "elbow",
+                "knee",
+                "yüz",
+                "saç",
+                "dirsek",
+                "bacak",
+                "sırt",
+                "göğüs",
+                "gogus",
+                "ayak",
+                "diz",
+            )
+        )
+    )
+    symptomish = any(
+        w in msg
+        for w in (
+            "itch",
+            "itchy",
+            "hurt",
+            "hurts",
+            "burn",
+            "pain",
+            "red",
+            "rash",
+            "dry",
+            "scale",
+            "flake",
+            "bump",
+            "spots",
+            "kaşıntı",
+            "kasinti",
+            "yanma",
+            "ağrı",
+            "agri",
+            "kızarık",
+            "kizarik",
+            "döküntü",
+            "dokuntu",
+        )
+    )
+
+    if goal in ("symptom_assessment", "diagnosis_question", "cause_assessment"):
+        if not has_body and (locationish or symptomish):
+            return True
+        if not has_sym and symptomish:
+            return True
+        return False
+
+    # treatment_advice: gate needs body OR symptom; user may add the missing piece
+    if goal == "treatment_advice":
+        if not has_body and locationish:
+            return True
+        if not has_sym and symptomish:
+            return True
+    return False
 
 
 def classify_user_intent(message: str) -> str:
@@ -162,10 +281,10 @@ def general_help_response(language: str) -> str:
 def out_of_scope_response(language: str) -> str:
     if language == "tr":
         return (
-            "Bu asistan yalnızca cilt, saçlı deri ve tırnaklarla ilgili sorular için tasarlanmıştır. "
-            "Lütfen bu konulara yönelik bir soru sorun veya genel bilgi için \"Ne yapabilirsin?\" yazın."
+            "Yalnızca cilt, saçlı deri ve tırnaklarla ilgili sorulara yanıt verebilirim. "
+            "Lütfen bu alanda bir soru sorun, böylece size daha iyi rehberlik edebilirim."
         )
     return (
-        "This assistant only answers questions about skin, scalp, and nails. "
-        "Please ask a question in that area, or type what you can ask for general help."
+        "I can only answer questions about skin, scalp, and nails. "
+        "Please ask a question in that area so I can guide you further."
     )
