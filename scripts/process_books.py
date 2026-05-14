@@ -364,6 +364,26 @@ def is_prose_start_paragraph(p: str) -> bool:
     return False
 
 
+def strip_trailing_reference_suffix(text: str) -> str:
+    """
+    Remove a reference appendix glued after clinical prose in the same block.
+
+    Requires a newline before the heading so in-line phrases are not matched.
+    Do not run on whole-book strings: apply per paragraph and per final chunk only.
+    """
+    t = re.sub(
+        r"(?is)\n\s*(?:Kaynaklar|Kaynakça|Key\s+references|References)\b\s*\n[\s\S]*\Z",
+        "",
+        text,
+    )
+    t = re.sub(
+        r"(?is)^\s*(?:Kaynaklar|Kaynakça|Key\s+references|References)\b\s*\n[\s\S]*\Z",
+        "",
+        t,
+    )
+    return t.strip()
+
+
 def strip_leading_front_matter(paragraphs: list[str]) -> list[str]:
     out = list(paragraphs)
     stripped = 0
@@ -413,6 +433,7 @@ def filter_and_clean_paragraphs(paragraphs: list[str]) -> list[str]:
         p = strip_running_header_lines(p)
         p = remove_figure_caption_lines(p)
         p = clean_text(p)
+        p = strip_trailing_reference_suffix(p)
         if p:
             cleaned.append(p)
     cleaned = strip_leading_front_matter(cleaned)
@@ -671,6 +692,9 @@ def main():
         paragraphs = filter_and_clean_paragraphs(paragraphs)
         semantic_chunks = build_semantic_chunks(paragraphs)
         semantic_chunks = deduplicate_chunk_boundaries(semantic_chunks)
+
+        for ch in semantic_chunks:
+            ch["text"] = strip_trailing_reference_suffix(ch["text"])
 
         kept = []
         for ch in semantic_chunks:
