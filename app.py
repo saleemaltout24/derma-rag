@@ -28,7 +28,7 @@ ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -71,6 +71,9 @@ async def chat(
         history = get_or_create_history(session_id)
         state = get_or_create_state(session_id)
 
+        if not question.strip() and not file:
+            raise HTTPException(status_code=400, detail="Provide a question, an image, or both.")
+
         if question:
             if is_probable_slot_followup(question, history, state) or is_referential_followup(
                 question, history, state
@@ -79,7 +82,7 @@ async def chat(
             else:
                 intent = classify_user_intent(question)
         else:
-            intent = "MEDICAL_QUESTION"
+            intent = "MULTIMODAL_QUESTION"
 
         if intent == "LANGUAGE_CHANGE_TR":
             session_languages[session_id] = "tr"
@@ -174,6 +177,13 @@ async def chat(
             history.append({"role": "assistant", "content": answer})
             persist_session_data(session_id, chat_sessions, session_state, session_languages)
 
+            from backend.gradcam import generate_gradcam
+
+            class_idx = classifier_result.get("predicted_class_index")
+            if class_idx is not None and class_idx < 0:
+                class_idx = None
+            heatmap_b64 = generate_gradcam(temp_path, class_idx=class_idx)
+
             response_payload = {
                 "session_id": session_id,
                 "intent": "MULTIMODAL_QUESTION",
@@ -182,6 +192,8 @@ async def chat(
                 "image_matches": image_matches,
                 "text_matches": text_docs,
                 "classifier_result": classifier_result,
+                "classification": classifier_result,
+                "heatmap": heatmap_b64,
                 "structured_state": session_state[session_id],
                 "history": history,
                 **({"retrieval_debug": retrieval_debug} if DEBUG_PAYLOADS else {}),
@@ -308,16 +320,27 @@ async def gradcam_endpoint(
     from backend.gradcam import generate_gradcam
     from backend.skin_classifier import classify_skin_image
 
-    suffix = Path(file.filename).suffix or ".jpg"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = tmp.name
-
     try:
+        safe_path = build_safe_upload_path(file.filename or "upload.jpg")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    tmp_path = str(safe_path)
+    try:
+        with open(tmp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
         classification = classify_skin_image(tmp_path)
-        heatmap_b64 = generate_gradcam(tmp_path)
+        class_idx = classification.get("predicted_class_index")
+        if class_idx is not None and class_idx < 0:
+            class_idx = None
+        heatmap_b64 = generate_gradcam(tmp_path, class_idx=class_idx)
+        if heatmap_b64 is None:
+            err = classification.get("error") or "Grad-CAM could not be generated."
+            raise HTTPException(status_code=503, detail=err)
         return {
             "classification": classification,
+            "classifier_result": classification,
             "heatmap": heatmap_b64,
         }
     finally:

@@ -14,7 +14,7 @@ from backend.skin_classifier import (
 )
 
 
-def generate_gradcam(image_path: str, class_idx: int = None) -> str | None:
+def generate_gradcam(image_path: str, class_idx: int | None = None) -> str | None:
     model, err = get_skin_classifier_model()
     if model is None:
         print(f"[GradCAM] Skipped: {err}")

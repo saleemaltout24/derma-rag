@@ -128,6 +128,7 @@ def classify_skin_image(image_path: str) -> dict:
     if model is None:
         return {
             "predicted_class": "UNAVAILABLE",
+            "predicted_class_index": -1,
             "predicted_name": "Classifier weights not loaded",
             "confidence": 0.0,
             "all_predictions": [],
@@ -170,6 +171,7 @@ def classify_skin_image(image_path: str) -> dict:
 
         return {
             "predicted_class": top["code"],
+            "predicted_class_index": CLASSES.index(top["code"]),
             "predicted_name": top["name"],
             "confidence": top["confidence"],
             "all_predictions": results,
@@ -180,6 +182,7 @@ def classify_skin_image(image_path: str) -> dict:
         print(f"[Classifier] Error: {e}")
         return {
             "predicted_class": "UNKNOWN",
+            "predicted_class_index": -1,
             "predicted_name": "Unknown",
             "confidence": 0.0,
             "all_predictions": [],

@@ -77,11 +77,10 @@ Sen hasta dostu bir dermatoloji asistanısın.
 
 ÖNEMLİ KURALLAR:
 - Cevabı sadece Türkçe ver.
-- Kesin tanı koyma, ama sınıflandırıcı sonucunu daima başta belirt.
-- Sınıflandırıcı (aşağıda) en güvenilir kanıttır. Cevabına mutlaka sınıflandırıcının en yüksek tahminini yazarak başla.
-- Ders kitabı metni ve görselleri destekleyici kanıttır; sınıflandırıcıyla uyumluysa birlikte sun.
-- Ders kitabı sınıflandırıcıyla çelişirse, sınıflandırıcı önceliklidir — farkı kısaca belirt.
-- Sınıflandırıcı listesinde OLMAYAN hastalık adlarını KULLANMA.
+- Kesin tanı koyma.
+- Sınıflandırıcı kullanılabilir ise cevabına en yüksek tahminle başla; kullanılamıyorsa ders kitabı kanıtına dayan.
+- Ders kitabı metni ve görselleri destekleyici veya birincil kanıttır.
+- Sınıflandırıcı listesinde OLMAYAN hastalık adlarını KULLANMA (sınıflandırıcı varsa).
 - Kısa, anlaşılır ve pratik yaz.
 - Kullanıcıyı gereksiz korkutma.
 
@@ -117,11 +116,11 @@ You are a patient-friendly dermatology assistant.
 
 CRITICAL RULES:
 - Answer only in English.
-- Do not give a confirmed diagnosis, but always lead with the classifier's top prediction.
-- The classifier result below is the primary evidence. You MUST start your answer by stating the classifier's top predicted condition and its confidence.
-- Textbook text and images are supporting evidence; present them alongside the classifier when they agree.
-- If textbook evidence contradicts the classifier, the classifier takes priority — briefly note the disagreement.
-- NEVER use disease names that are NOT in the classifier's prediction list.
+- Do not give a confirmed diagnosis.
+- If the classifier is available, lead with its top prediction and confidence; if unavailable, rely on textbook evidence.
+- Textbook text and images are supporting or primary evidence depending on classifier availability.
+- If the classifier is available and contradicts textbook evidence, note the disagreement briefly.
+- When the classifier is available, never use disease names outside its prediction list.
 - Keep the answer practical and easy to understand.
 - Do not scare the user unnecessarily.
 
@@ -160,7 +159,7 @@ def format_classifier_context(classifier_result: dict) -> str:
     all_preds = classifier_result.get("all_predictions", [])
 
     if not top_name or top_confidence == 0.0:
-        return "Classifier unavailable for this image."
+        return "CLASSIFIER_UNAVAILABLE: weights missing or inference failed. Use textbook text and images as primary evidence."
 
     lines = [
         f"TOP PREDICTION: {top_name} ({top_confidence:.1f}% confidence)",

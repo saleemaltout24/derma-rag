@@ -41,7 +41,7 @@ CLASSIFIER_MODEL_PATH = os.getenv("CLASSIFIER_MODEL_PATH", "")
 CLASSIFIER_LABELS = [label.strip() for label in os.getenv("CLASSIFIER_LABELS", "").split(",") if label.strip()]
 USE_SQLITE_SESSIONS = os.getenv("USE_SQLITE_SESSIONS", "false").lower() == "true"
 SESSION_DB_PATH = Path(os.getenv("SESSION_DB_PATH", str(DATA_DIR / "sessions.db")))
-DEBUG_PAYLOADS = os.getenv("DEBUG_PAYLOADS", "true").lower() == "true"
+DEBUG_PAYLOADS = os.getenv("DEBUG_PAYLOADS", "false").lower() == "true"
 
 EMBEDDING_MODEL = EMBED_MODEL
 

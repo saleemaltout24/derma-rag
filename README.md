@@ -20,7 +20,7 @@ pip install -r requirements.txt
 ### 2. Install Ollama
 ```bash
 brew install ollama
-ollama pull llama3.2:1b
+ollama pull mistral:7b
 ```
 
 ### 3. Add classifier weights
@@ -56,6 +56,6 @@ python scripts/eval_classifier.py
 ```
 
 ## Notes
-- vectorstore/ and processed/ folders must be present (get from project owner)
+- data/vectorstore/ and processed/ folders must be present (get from project owner)
 - data/textbook_images/ folder must be present (get from project owner)
 - data/textbooks/ folder must be present (get from project owner)
