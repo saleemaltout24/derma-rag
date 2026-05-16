@@ -24,6 +24,7 @@ app = FastAPI(title="Dermatology RAG Chatbot")
 
 ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -173,7 +174,7 @@ async def chat(
             history.append({"role": "assistant", "content": answer})
             persist_session_data(session_id, chat_sessions, session_state, session_languages)
 
-            return {
+            response_payload = {
                 "session_id": session_id,
                 "intent": "MULTIMODAL_QUESTION",
                 "answer": answer,
@@ -181,11 +182,11 @@ async def chat(
                 "image_matches": image_matches,
                 "text_matches": text_docs,
                 "classifier_result": classifier_result,
-                "classification": classifier_result,
                 "structured_state": session_state[session_id],
                 "history": history,
                 **({"retrieval_debug": retrieval_debug} if DEBUG_PAYLOADS else {}),
             }
+            return response_payload
 
         answer, updated_state, retrieval_debug = answer_medical_question(
             question=question,

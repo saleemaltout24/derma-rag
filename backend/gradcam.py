@@ -5,7 +5,7 @@ from PIL import Image
 import base64
 import io
 
-from backend.skin_classifier import get_skin_classifier_model, transform
+from backend.skin_classifier import get_skin_classifier_model, load_image_rgb_exif, transform
 
 
 def generate_gradcam(image_path: str, class_idx: int = None) -> str | None:
@@ -14,7 +14,7 @@ def generate_gradcam(image_path: str, class_idx: int = None) -> str | None:
         print(f"[GradCAM] Skipped: {err}")
         return None
     try:
-        original = Image.open(image_path).convert("RGB")
+        original = load_image_rgb_exif(image_path)
         input_tensor = transform(original).unsqueeze(0)
 
         gradients = []

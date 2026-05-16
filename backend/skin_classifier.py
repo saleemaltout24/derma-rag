@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 from torchvision import transforms, models
-from PIL import Image
+from torchvision.transforms import functional as TF
+from PIL import Image, ImageOps
 from pathlib import Path
 
 CLASSES = ["MEL", "NV", "BCC", "AK", "BKL", "DF", "VASC", "SCC"]
@@ -19,6 +20,7 @@ CLASS_NAMES = {
 MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "skin_classifier_v2.pth"
 device = torch.device("cpu")
 
+# Resize + ImageNet normalize; apply to EXIF-corrected RGB PIL images (same for classifier + GradCAM).
 transform = transforms.Compose(
     [
         transforms.Resize((224, 224)),
@@ -29,6 +31,22 @@ transform = transforms.Compose(
 
 _model: nn.Module | None = None
 _unavailable_reason: str | None = None
+
+
+def load_image_rgb_exif(image_path: str) -> Image.Image:
+    """Open RGB, apply EXIF orientation, then resize/normalize via `transform`."""
+    img = Image.open(image_path).convert("RGB")
+    return ImageOps.exif_transpose(img)
+
+
+def _uncertainty_fields() -> dict:
+    return {
+        "confidence_tier": "low",
+        "margin": 0.0,
+        "ambiguous": True,
+        "top2_name": None,
+        "top2_confidence": 0.0,
+    }
 
 
 def get_skin_classifier_model() -> tuple[nn.Module | None, str | None]:
@@ -64,6 +82,14 @@ def get_skin_classifier_model() -> tuple[nn.Module | None, str | None]:
         return None, _unavailable_reason
 
 
+def _confidence_tier(top_pct: float) -> str:
+    if top_pct > 70:
+        return "high"
+    if top_pct >= 40:
+        return "medium"
+    return "low"
+
+
 def classify_skin_image(image_path: str) -> dict:
     model, err = get_skin_classifier_model()
     if model is None:
@@ -73,14 +99,18 @@ def classify_skin_image(image_path: str) -> dict:
             "confidence": 0.0,
             "all_predictions": [],
             "error": err,
+            **_uncertainty_fields(),
         }
     try:
-        image = Image.open(image_path).convert("RGB")
-        input_tensor = transform(image).unsqueeze(0).to(device)
+        pil = load_image_rgb_exif(image_path)
+        chw = transform(pil)
+        chw_flip = TF.hflip(chw)
+        batch = torch.stack([chw, chw_flip], dim=0).to(device)
 
-        with torch.no_grad():
-            outputs = model(input_tensor)
-            probabilities = torch.softmax(outputs, dim=1)[0]
+        with torch.inference_mode():
+            logits = model(batch)
+            logits_mean = logits.mean(dim=0, keepdim=True)
+            probabilities = torch.softmax(logits_mean, dim=1)[0]
 
         results = []
         for i, (cls, prob) in enumerate(zip(CLASSES, probabilities)):
@@ -94,12 +124,24 @@ def classify_skin_image(image_path: str) -> dict:
 
         results.sort(key=lambda x: x["confidence"], reverse=True)
         top = results[0]
+        top_pct = top["confidence"]
+        second = results[1] if len(results) > 1 else {"name": None, "confidence": 0.0}
+        margin = round(top_pct - second["confidence"], 2)
+
+        extra = {
+            "confidence_tier": _confidence_tier(top_pct),
+            "margin": margin,
+            "ambiguous": margin < 15.0,
+            "top2_name": second["name"],
+            "top2_confidence": second["confidence"] if second["name"] is not None else 0.0,
+        }
 
         return {
             "predicted_class": top["code"],
             "predicted_name": top["name"],
             "confidence": top["confidence"],
             "all_predictions": results,
+            **extra,
         }
 
     except Exception as e:
@@ -110,4 +152,5 @@ def classify_skin_image(image_path: str) -> dict:
             "confidence": 0.0,
             "all_predictions": [],
             "error": str(e),
+            **_uncertainty_fields(),
         }

@@ -228,7 +228,7 @@ Label:
     if label in ALLOWED_INTENTS:
         return label
 
-    return "OUT_OF_SCOPE"
+    return "MEDICAL_QUESTION"
 
 
 def is_greeting(message: str) -> bool:

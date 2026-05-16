@@ -93,7 +93,6 @@ export default function App() {
       const data = await response.json();
       setLastResponse(data);
       setStructuredState(data.structured_state || null);
-      if (data.classification) setClassification(data.classification);
 
       const answer = data.answer || data.error || "No response received.";
       setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
@@ -133,12 +132,6 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const getConfidenceColor = (confidence) => {
-    if (confidence >= 70) return "bg-green-500";
-    if (confidence >= 40) return "bg-yellow-500";
-    return "bg-red-500";
   };
 
   return (
@@ -237,27 +230,81 @@ export default function App() {
               <h2 className="mb-4 text-lg font-semibold">🔬 AI Diagnosis</h2>
               {classification ? (
                 <div className="space-y-3">
-                  <div className={`rounded-2xl p-4 ${darkMode ? "bg-blue-900/40 border border-blue-700" : "bg-blue-50 border border-blue-200"}`}>
-                    <div className="text-xs text-blue-400 mb-1">Most Likely Condition</div>
-                    <div className="text-lg font-bold">{classification.predicted_name}</div>
-                    <div className="text-sm text-zinc-400">{classification.confidence.toFixed(1)}% confidence</div>
-                  </div>
-                  <div className="space-y-2">
-                    {classification.all_predictions?.map((pred) => (
-                      <div key={pred.code} className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span>{pred.name}</span>
-                          <span>{pred.confidence.toFixed(1)}%</span>
+                  {(() => {
+                    const tier =
+                      classification.confidence_tier ??
+                      (classification.confidence > 70
+                        ? "high"
+                        : classification.confidence >= 40
+                          ? "medium"
+                          : "low");
+                    const barFillClass =
+                      tier === "high"
+                        ? "bg-green-500"
+                        : tier === "medium"
+                          ? "bg-yellow-500"
+                          : "bg-red-500";
+                    const showLowWarning =
+                      classification.ambiguous === true || tier === "low";
+                    const showMediumInfo = !showLowWarning && tier === "medium";
+                    const runnerUp =
+                      classification.top2_name != null && classification.top2_name !== "";
+
+                    return (
+                      <>
+                        <div className={`rounded-2xl p-4 ${darkMode ? "bg-blue-900/40 border border-blue-700" : "bg-blue-50 border border-blue-200"}`}>
+                          <div className="text-xs text-blue-400 mb-1">Most Likely Condition</div>
+                          <div className="text-lg font-bold">{classification.predicted_name}</div>
+                          <div className="text-sm text-zinc-400">{classification.confidence.toFixed(1)}% confidence</div>
+                          {runnerUp && (
+                            <div className={`mt-2 border-t pt-2 text-sm ${darkMode ? "border-blue-800 text-zinc-300" : "border-blue-200 text-zinc-600"}`}>
+                              <span className="font-medium">Runner-up:</span>{" "}
+                              {classification.top2_name}{" "}
+                              <span className={theme.muted}>({Number(classification.top2_confidence).toFixed(1)}%)</span>
+                            </div>
+                          )}
                         </div>
-                        <div className="h-2 rounded-full bg-zinc-700">
+                        {showLowWarning && (
                           <div
-                            className={`h-2 rounded-full ${getConfidenceColor(pred.confidence)}`}
-                            style={{ width: `${pred.confidence}%` }}
-                          />
+                            className={`rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
+                              darkMode
+                                ? "border-yellow-600/70 bg-yellow-950/50 text-yellow-100"
+                                : "border-amber-400 bg-amber-50 text-amber-950"
+                            }`}
+                          >
+                            ⚠️ Low confidence — model is uncertain. Results are approximate.
+                          </div>
+                        )}
+                        {showMediumInfo && (
+                          <div
+                            className={`rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
+                              darkMode
+                                ? "border-blue-500/60 bg-blue-950/40 text-blue-100"
+                                : "border-blue-300 bg-blue-50 text-blue-950"
+                            }`}
+                          >
+                            ℹ️ Moderate confidence — use as a guide only.
+                          </div>
+                        )}
+                        <div className="space-y-2">
+                          {classification.all_predictions?.map((pred) => (
+                            <div key={pred.code} className="space-y-1">
+                              <div className="flex justify-between text-xs">
+                                <span>{pred.name}</span>
+                                <span>{pred.confidence.toFixed(1)}%</span>
+                              </div>
+                              <div className="h-2 rounded-full bg-zinc-700">
+                                <div
+                                  className={`h-2 rounded-full ${barFillClass}`}
+                                  style={{ width: `${pred.confidence}%` }}
+                                />
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ) : (
                 <p className={`text-sm ${theme.muted}`}>Upload a skin image to see AI diagnosis.</p>

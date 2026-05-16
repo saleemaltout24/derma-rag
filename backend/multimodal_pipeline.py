@@ -1,5 +1,5 @@
 from backend.config import RERANK_TOP_K, RETRIEVE_TOP_K
-from backend.classifier import run_optional_classifier
+from backend.skin_classifier import classify_skin_image
 from backend.image_pipeline import analyze_skin_image
 from backend.image_vector_store import search_similar_images
 from backend.rag_pipeline import detect_language, format_user_history, rerank_docs
@@ -75,100 +75,101 @@ def build_multimodal_prompt(
         return f"""
 Sen hasta dostu bir dermatoloji asistanısın.
 
-Kurallar:
+ÖNEMLİ KURALLAR:
 - Cevabı sadece Türkçe ver.
-- Kesin tanı koyma.
-- Kanıt kaynaklarını karıştırma:
-  - Sistem A (ders kitabı metni + ders kitabı görselleri) ana kaynaktır.
-  - Sistem B (opsiyonel sınıflandırıcı) varsa sadece zayıf ön bilgi olarak kullan.
-- En olası yaygın durumları önce düşün.
+- Kesin tanı koyma, ama sınıflandırıcı sonucunu daima başta belirt.
+- Sınıflandırıcı (aşağıda) en güvenilir kanıttır. Cevabına mutlaka sınıflandırıcının en yüksek tahminini yazarak başla.
+- Ders kitabı metni ve görselleri destekleyici kanıttır; sınıflandırıcıyla uyumluysa birlikte sun.
+- Ders kitabı sınıflandırıcıyla çelişirse, sınıflandırıcı önceliklidir — farkı kısaca belirt.
+- Sınıflandırıcı listesinde OLMAYAN hastalık adlarını KULLANMA.
 - Kısa, anlaşılır ve pratik yaz.
 - Kullanıcıyı gereksiz korkutma.
-- Kanıtlar çelişirse bunu açıkça söyle ve System A'ya öncelik ver.
 
-Konuşma geçmişi:
-{history_text}
-
-Yapısal durum özeti:
-{structured_state}
-
-Kullanıcının yazdığı mesaj:
-{question}
-
-Kanıt Bölümü 1 - Kullanıcı görsel açıklaması:
-{image_description}
-
-Kanıt Bölümü 2 - Sistem A (ders kitabı benzer görseller):
-{image_context}
-
-Kanıt Bölümü 3 - Sistem A (erişilen ders kitabı metni):
-{text_context}
-
-Kanıt Bölümü 4 - Sistem B (opsiyonel sınıflandırıcı):
+=== SINIFLANDIRICI SONUCU (birincil kanıt) ===
 {classifier_context}
 
-Cevap formatı:
-1. En olası durum
-2. Neden buna benziyor
+=== Konuşma geçmişi ===
+{history_text}
+
+=== Yapısal durum özeti ===
+{structured_state}
+
+=== Kullanıcının yazdığı mesaj ===
+{question}
+
+=== Kullanıcı görsel açıklaması ===
+{image_description}
+
+=== Ders kitabı benzer görseller (destekleyici) ===
+{image_context}
+
+=== Ders kitabı metni (destekleyici) ===
+{text_context}
+
+Cevap formatı (bu sırayı takip et):
+1. En olası durum — sınıflandırıcının en yüksek tahminini ve güven oranını yaz
+2. Neden buna benziyor — görselden ve ders kitabından destekleyici bilgi
 3. Ne yapabilirsiniz
 4. Ne zaman doktora görünmeli
 """
     return f"""
 You are a patient-friendly dermatology assistant.
 
-Rules:
+CRITICAL RULES:
 - Answer only in English.
-- Do not give a confirmed diagnosis.
-- Keep evidence channels separate:
-  - System A (textbook text + textbook images) is the primary grounded evidence.
-  - System B (optional classifier) is only a weak prior if present.
-- Focus on the most likely common conditions first.
+- Do not give a confirmed diagnosis, but always lead with the classifier's top prediction.
+- The classifier result below is the primary evidence. You MUST start your answer by stating the classifier's top predicted condition and its confidence.
+- Textbook text and images are supporting evidence; present them alongside the classifier when they agree.
+- If textbook evidence contradicts the classifier, the classifier takes priority — briefly note the disagreement.
+- NEVER use disease names that are NOT in the classifier's prediction list.
 - Keep the answer practical and easy to understand.
 - Do not scare the user unnecessarily.
-- If channels disagree, state the disagreement and prioritize System A.
 
-Conversation history:
-{history_text}
-
-Structured state:
-{structured_state}
-
-User message:
-{question}
-
-Evidence block 1 - Uploaded image description:
-{image_description}
-
-Evidence block 2 - System A (similar textbook images):
-{image_context}
-
-Evidence block 3 - System A (retrieved textbook text):
-{text_context}
-
-Evidence block 4 - System B (optional classifier):
+=== CLASSIFIER RESULT (primary evidence) ===
 {classifier_context}
 
-Answer format:
-1. Most likely condition
-2. Why it may match
+=== Conversation history ===
+{history_text}
+
+=== Structured state ===
+{structured_state}
+
+=== User message ===
+{question}
+
+=== Uploaded image description ===
+{image_description}
+
+=== Similar textbook images (supporting) ===
+{image_context}
+
+=== Retrieved textbook text (supporting) ===
+{text_context}
+
+Answer format (follow this order):
+1. Most likely condition — state the classifier's top prediction and confidence percentage
+2. Why it may match — supporting details from the image and textbook
 3. What you can do
 4. When to see a doctor
 """
 
 
 def format_classifier_context(classifier_result: dict) -> str:
-    label = classifier_result.get("label")
-    confidence = classifier_result.get("confidence")
-    uncertainty = classifier_result.get("uncertainty")
-    note = classifier_result.get("note", "")
-    enabled = classifier_result.get("enabled", False)
-    return (
-        f"enabled: {enabled}\n"
-        f"label: {label}\n"
-        f"confidence: {confidence}\n"
-        f"uncertainty: {uncertainty}\n"
-        f"note: {note}"
-    )
+    top_name = classifier_result.get("predicted_name", "")
+    top_confidence = classifier_result.get("confidence", 0.0)
+    all_preds = classifier_result.get("all_predictions", [])
+
+    if not top_name or top_confidence == 0.0:
+        return "Classifier unavailable for this image."
+
+    lines = [
+        f"TOP PREDICTION: {top_name} ({top_confidence:.1f}% confidence)",
+        "",
+        "Full ranking:",
+    ]
+    for pred in all_preds:
+        lines.append(f"  - {pred['name']}: {pred['confidence']:.1f}%")
+    return "\n".join(lines)
 
 
 def answer_multimodal_question(
@@ -211,7 +212,7 @@ def answer_multimodal_question(
     image_context = build_image_context(image_matches)
     text_context = build_text_context(text_docs)
     structured_state_text = format_state_for_prompt(updated_state)
-    classifier_result = run_optional_classifier(image_path)
+    classifier_result = classify_skin_image(image_path)
     classifier_context = format_classifier_context(classifier_result)
 
     prompt = build_multimodal_prompt(
