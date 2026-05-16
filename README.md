@@ -23,10 +23,8 @@ brew install ollama
 ollama pull llama3.2:1b
 ```
 
-### 3. Fix paths for your machine
-```bash
-python fix_paths.py
-```
+### 3. Add classifier weights
+Place `skin_classifier_v2.pth` in the `models/` folder (not in git — download from project owner).
 
 ### 4. Run the app
 
@@ -50,6 +48,12 @@ npm run dev
 
 ### 5. Open browser
 Go to http://localhost:5173
+
+### 6. (Optional) Test classifier on labeled images
+```bash
+# Put test images in data/eval/MEL/, data/eval/BCC/, etc.
+python scripts/eval_classifier.py
+```
 
 ## Notes
 - vectorstore/ and processed/ folders must be present (get from project owner)

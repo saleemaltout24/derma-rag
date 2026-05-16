@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torchvision import transforms, models
-from torchvision.transforms import functional as TF
 from PIL import Image, ImageOps
 from pathlib import Path
 
@@ -20,12 +19,15 @@ CLASS_NAMES = {
 MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "skin_classifier_v2.pth"
 device = torch.device("cpu")
 
-# Resize + ImageNet normalize; apply to EXIF-corrected RGB PIL images (same for classifier + GradCAM).
+# ImageNet normalize after letterbox (same for classifier + GradCAM).
+_IMAGENET_MEAN = [0.485, 0.456, 0.406]
+_IMAGENET_STD = [0.229, 0.224, 0.225]
+INPUT_SIZE = 224
+
 transform = transforms.Compose(
     [
-        transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        transforms.Normalize(_IMAGENET_MEAN, _IMAGENET_STD),
     ]
 )
 
@@ -34,9 +36,40 @@ _unavailable_reason: str | None = None
 
 
 def load_image_rgb_exif(image_path: str) -> Image.Image:
-    """Open RGB, apply EXIF orientation, then resize/normalize via `transform`."""
+    """Open RGB and apply EXIF orientation."""
     img = Image.open(image_path).convert("RGB")
     return ImageOps.exif_transpose(img)
+
+
+def letterbox_rgb(pil: Image.Image, size: int = INPUT_SIZE) -> Image.Image:
+    """Resize to fit inside size×size, pad to square (keeps aspect ratio — good for dermoscopy)."""
+    w, h = pil.size
+    scale = size / max(w, h)
+    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+    resized = pil.resize((new_w, new_h), Image.Resampling.BILINEAR)
+    canvas = Image.new("RGB", (size, size), (0, 0, 0))
+    canvas.paste(resized, ((size - new_w) // 2, (size - new_h) // 2))
+    return canvas
+
+
+def pil_to_model_tensor(pil: Image.Image) -> torch.Tensor:
+    """Letterbox + ImageNet normalize → CHW tensor."""
+    return transform(letterbox_rgb(pil))
+
+
+def load_model_tensor(image_path: str) -> torch.Tensor:
+    """Full path: file → EXIF fix → letterbox → tensor."""
+    return pil_to_model_tensor(load_image_rgb_exif(image_path))
+
+
+def _tta_pil_variants(pil: Image.Image) -> list[Image.Image]:
+    """Four views: original, horizontal flip, vertical flip, both."""
+    return [
+        pil,
+        pil.transpose(Image.FLIP_LEFT_RIGHT),
+        pil.transpose(Image.FLIP_TOP_BOTTOM),
+        pil.transpose(Image.ROTATE_180),
+    ]
 
 
 def _uncertainty_fields() -> dict:
@@ -102,10 +135,9 @@ def classify_skin_image(image_path: str) -> dict:
             **_uncertainty_fields(),
         }
     try:
-        pil = load_image_rgb_exif(image_path)
-        chw = transform(pil)
-        chw_flip = TF.hflip(chw)
-        batch = torch.stack([chw, chw_flip], dim=0).to(device)
+        pil = letterbox_rgb(load_image_rgb_exif(image_path))
+        tensors = [transform(v) for v in _tta_pil_variants(pil)]
+        batch = torch.stack(tensors, dim=0).to(device)
 
         with torch.inference_mode():
             logits = model(batch)

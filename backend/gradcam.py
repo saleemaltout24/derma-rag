@@ -5,7 +5,13 @@ from PIL import Image
 import base64
 import io
 
-from backend.skin_classifier import get_skin_classifier_model, load_image_rgb_exif, transform
+from backend.skin_classifier import (
+    INPUT_SIZE,
+    get_skin_classifier_model,
+    letterbox_rgb,
+    load_image_rgb_exif,
+    transform,
+)
 
 
 def generate_gradcam(image_path: str, class_idx: int = None) -> str | None:
@@ -15,7 +21,8 @@ def generate_gradcam(image_path: str, class_idx: int = None) -> str | None:
         return None
     try:
         original = load_image_rgb_exif(image_path)
-        input_tensor = transform(original).unsqueeze(0)
+        boxed = letterbox_rgb(original)
+        input_tensor = transform(boxed).unsqueeze(0)
 
         gradients = []
         activations = []
@@ -52,7 +59,7 @@ def generate_gradcam(image_path: str, class_idx: int = None) -> str | None:
         cam = cam.detach().numpy()
 
         cam_img = Image.fromarray((cam * 255).astype(np.uint8))
-        cam_img = cam_img.resize(original.size, Image.BILINEAR)
+        cam_img = cam_img.resize((INPUT_SIZE, INPUT_SIZE), Image.BILINEAR)
         cam_np = np.array(cam_img)
 
         heatmap = np.zeros((*cam_np.shape, 3), dtype=np.uint8)
@@ -60,8 +67,9 @@ def generate_gradcam(image_path: str, class_idx: int = None) -> str | None:
         heatmap[:, :, 1] = (255 - cam_np) // 2
         heatmap[:, :, 2] = 0
 
-        original_np = np.array(original)
-        overlay = (0.6 * original_np + 0.4 * heatmap).astype(np.uint8)
+        # Overlay on letterboxed view (matches classifier input geometry)
+        display_np = np.array(boxed)
+        overlay = (0.6 * display_np + 0.4 * heatmap).astype(np.uint8)
         overlay_img = Image.fromarray(overlay)
 
         buffer = io.BytesIO()

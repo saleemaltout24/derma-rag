@@ -93,6 +93,7 @@ export default function App() {
       const data = await response.json();
       setLastResponse(data);
       setStructuredState(data.structured_state || null);
+      if (data.classifier_result) setClassification(data.classifier_result);
 
       const answer = data.answer || data.error || "No response received.";
       setMessages((prev) => [...prev, { role: "assistant", content: answer }]);

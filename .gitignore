@@ -2,6 +2,7 @@ venv/
 .venv/
 .env
 __pycache__/
+.DS_Store
 frontend/node_modules/
 *.pyc
 data/textbooks/
@@ -9,5 +10,13 @@ data/textbook_images/
 vectorstore/
 processed/
 data/uploads/
+# Training / eval images (folder layout tracked via .gitkeep)
+data/ham10000/*
+!data/ham10000/.gitkeep
+data/eval/**/*.jpg
+data/eval/**/*.jpeg
+data/eval/**/*.png
+data/eval/**/*.webp
+data/eval/**/*.bmp
 *.pth
 *.bin
