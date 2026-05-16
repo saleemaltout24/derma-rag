@@ -13,6 +13,18 @@ function isClassifierUnavailable(result) {
   return code === "UNAVAILABLE" || code === "UNKNOWN" || (result.confidence ?? 0) === 0;
 }
 
+function formatTextbookMatchLabel(match, index) {
+  const book = match.source_pdf || match.source;
+  const page = match.page;
+  const file = match.file_name;
+  const parts = [];
+  if (book) parts.push(String(book));
+  if (page != null && page !== "") parts.push(`page ${page}`);
+  if (file) parts.push(String(file));
+  if (parts.length) return parts.join(" · ");
+  return match.disease || match.caption || `Match ${index + 1}`;
+}
+
 async function parseApiResponse(response) {
   let data = {};
   try {
@@ -384,16 +396,27 @@ export default function App() {
             {imageMatches.length > 0 && (
               <div className={`rounded-3xl border p-5 shadow-xl ${theme.card}`}>
                 <h2 className="mb-4 text-lg font-semibold">📚 Similar textbook images</h2>
-                <ul className={`space-y-2 text-sm ${theme.muted}`}>
-                  {imageMatches.slice(0, 5).map((match, i) => (
-                    <li key={i} className="truncate">
-                      {match.disease || match.caption || `Match ${i + 1}`}
-                      {match.body_site && <span className="ml-1 opacity-80">— {match.body_site}</span>}
-                      {match.score != null && (
-                        <span className="ml-1 opacity-70">({Number(match.score).toFixed(2)})</span>
-                      )}
-                    </li>
-                  ))}
+                <ul className={`space-y-3 text-sm ${theme.muted}`}>
+                  {imageMatches.slice(0, 5).map((match, i) => {
+                    const label = formatTextbookMatchLabel(match, i);
+                    const extra = [match.disease, match.caption].filter(Boolean).join(" — ");
+                    return (
+                      <li key={i} className="leading-snug">
+                        <div className="truncate font-medium text-slate-800 dark:text-slate-100">
+                          {label}
+                          {match.score != null && (
+                            <span className="ml-1 font-normal opacity-70">
+                              ({Number(match.score).toFixed(2)})
+                            </span>
+                          )}
+                        </div>
+                        {extra && <div className="truncate text-xs opacity-80">{extra}</div>}
+                        {match.body_site && (
+                          <div className="truncate text-xs opacity-70">Site: {match.body_site}</div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}

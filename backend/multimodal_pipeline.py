@@ -1,3 +1,5 @@
+import re
+
 from backend.config import RERANK_TOP_K, RETRIEVE_TOP_K
 from backend.skin_classifier import classify_skin_image
 from backend.image_pipeline import analyze_skin_image
@@ -61,6 +63,98 @@ Medical description:
     return "\n".join(parts)
 
 
+def is_classifier_available(classifier_result: dict) -> bool:
+    code = classifier_result.get("predicted_class", "")
+    confidence = classifier_result.get("confidence", 0.0) or 0.0
+    if code in ("UNAVAILABLE", "UNKNOWN", ""):
+        return False
+    return confidence > 0
+
+
+def build_classifier_answer_lead(classifier_result: dict, language: str) -> str:
+    if not is_classifier_available(classifier_result):
+        return ""
+
+    name = classifier_result.get("predicted_name", "")
+    code = classifier_result.get("predicted_class", "")
+    confidence = float(classifier_result.get("confidence", 0.0))
+    top2_name = classifier_result.get("top2_name")
+    top2_confidence = classifier_result.get("top2_confidence")
+    ambiguous = classifier_result.get("ambiguous") is True
+    all_predictions = classifier_result.get("all_predictions", [])
+
+    ranking_lines = [
+        f"  - {pred.get('name', '?')}: {float(pred.get('confidence', 0)):.1f}%"
+        for pred in all_predictions[:8]
+    ]
+    ranking = "\n".join(ranking_lines)
+
+    if language == "tr":
+        lines = [
+            "### 1. En Olası Durum",
+            f"Bu yükleme için görüntü sınıflandırıcısının en yüksek tahmini: **{name}** ({code}) — **%{confidence:.1f}** güven.",
+        ]
+        if top2_name:
+            runner = f"İkinci sıra: {top2_name} (%{float(top2_confidence or 0):.1f})."
+            lines.append(
+                f"{runner} Model tam kesin değil — klinik değerlendirme önemli."
+                if ambiguous
+                else runner
+            )
+        lines.extend(
+            [
+                "",
+                "Bu görsel için sınıflandırıcı sıralaması:",
+                ranking,
+                "",
+                "*Yalnızca yapay zekâ taramasıdır; kesin tanı değildir. Şüpheli lezyonlar için dermatoloğa başvurun.*",
+            ]
+        )
+        return "\n".join(lines)
+
+    lines = [
+        "### 1. Most Likely Condition",
+        f"The skin image classifier's top prediction for **this upload** is **{name}** ({code}) at **{confidence:.1f}%** confidence.",
+    ]
+    if top2_name:
+        runner = f"Runner-up: {top2_name} ({float(top2_confidence or 0):.1f}%)."
+        lines.append(
+            f"{runner} The model is not fully certain — clinical review is important."
+            if ambiguous
+            else runner
+        )
+    lines.extend(
+        [
+            "",
+            "Classifier ranking for this image:",
+            ranking,
+            "",
+            "*AI screening estimate only — not a confirmed diagnosis. See a dermatologist for any concerning lesion.*",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def strip_duplicate_section_one(text: str) -> str:
+    """Remove a model-written section 1 so it cannot override the classifier lead."""
+    if not text or not text.strip():
+        return text
+    pattern = (
+        r"^\s*(?:#{1,3}\s*)?1\.\s*.+?"
+        r"(?=\n\s*(?:#{1,3}\s*)?2\.|\Z)"
+    )
+    return re.sub(pattern, "", text, count=1, flags=re.DOTALL | re.IGNORECASE).lstrip()
+
+
+def merge_multimodal_answer(lead: str, body: str) -> str:
+    body = strip_duplicate_section_one((body or "").strip())
+    if not lead:
+        return body
+    if not body:
+        return lead
+    return f"{lead}\n\n{body}"
+
+
 def build_multimodal_prompt(
     question: str,
     history_text: str,
@@ -70,21 +164,38 @@ def build_multimodal_prompt(
     text_context: str,
     classifier_context: str,
     language: str,
+    classifier_available: bool = False,
 ) -> str:
     if language == "tr":
+        section_rules = (
+            """
+ÖNEMLİ — Bölüm 1 zaten yazıldı. Bölüm 1 YAZMA. Bu yükleme için yalnızca yukarıdaki SINIFLANDIRICI SONUCU geçerlidir.
+Konuşma geçmişindeki eski tahminleri yok say; başka hastalık adı kullanma.
+Cevabına tam olarak şu başlıkla başla: ### 2. Neden buna benziyor
+Ardından: ### 3. Ne yapabilirsiniz  ve  ### 4. Ne zaman doktora görünmeli
+"""
+            if classifier_available
+            else """
+Cevap formatı (bu sırayı takip et):
+1. En olası durum — sınıflandırıcı veya ders kitabına göre
+2. Neden buna benziyor
+3. Ne yapabilirsiniz
+4. Ne zaman doktora görünmeli
+"""
+        )
         return f"""
 Sen hasta dostu bir dermatoloji asistanısın.
 
 ÖNEMLİ KURALLAR:
 - Cevabı sadece Türkçe ver.
 - Kesin tanı koyma.
-- Sınıflandırıcı kullanılabilir ise cevabına en yüksek tahminle başla; kullanılamıyorsa ders kitabı kanıtına dayan.
-- Ders kitabı metni ve görselleri destekleyici veya birincil kanıttır.
+- Sınıflandırıcı varsa yalnızca bu yüklemedeki sonuca uy; geçmiş mesajlardaki eski tahminleri tekrarlama.
+- Ders kitabı metni ve görselleri destekleyici kanıttır.
 - Sınıflandırıcı listesinde OLMAYAN hastalık adlarını KULLANMA (sınıflandırıcı varsa).
 - Kısa, anlaşılır ve pratik yaz.
 - Kullanıcıyı gereksiz korkutma.
-
-=== SINIFLANDIRICI SONUCU (birincil kanıt) ===
+{section_rules}
+=== SINIFLANDIRICI SONUCU (birincil kanıt — bu yükleme) ===
 {classifier_context}
 
 === Konuşma geçmişi ===
@@ -104,27 +215,38 @@ Sen hasta dostu bir dermatoloji asistanısın.
 
 === Ders kitabı metni (destekleyici) ===
 {text_context}
-
-Cevap formatı (bu sırayı takip et):
-1. En olası durum — sınıflandırıcının en yüksek tahminini ve güven oranını yaz
-2. Neden buna benziyor — görselden ve ders kitabından destekleyici bilgi
-3. Ne yapabilirsiniz
-4. Ne zaman doktora görünmeli
 """
+    section_rules = (
+        """
+IMPORTANT — Section 1 is already written for you. Do NOT write section 1.
+For this upload, ONLY the CLASSIFIER RESULT block above is valid for the disease name and confidence.
+Ignore disease names from conversation history (they may be from earlier images).
+Start your reply with exactly: ### 2. Why it may match
+Then: ### 3. What you can do  and  ### 4. When to see a doctor
+"""
+        if classifier_available
+        else """
+Answer format (follow this order):
+1. Most likely condition — from classifier or textbook if classifier unavailable
+2. Why it may match
+3. What you can do
+4. When to see a doctor
+"""
+    )
     return f"""
 You are a patient-friendly dermatology assistant.
 
 CRITICAL RULES:
 - Answer only in English.
 - Do not give a confirmed diagnosis.
-- If the classifier is available, lead with its top prediction and confidence; if unavailable, rely on textbook evidence.
-- Textbook text and images are supporting or primary evidence depending on classifier availability.
-- If the classifier is available and contradicts textbook evidence, note the disagreement briefly.
+- When the classifier is available, sections 2–4 must align with the CURRENT classifier result only.
+- Never repeat a disease name from an earlier message if it differs from the classifier block above.
+- Textbook text and images are supporting evidence.
 - When the classifier is available, never use disease names outside its prediction list.
 - Keep the answer practical and easy to understand.
 - Do not scare the user unnecessarily.
-
-=== CLASSIFIER RESULT (primary evidence) ===
+{section_rules}
+=== CLASSIFIER RESULT (primary evidence — this upload only) ===
 {classifier_context}
 
 === Conversation history ===
@@ -144,12 +266,6 @@ CRITICAL RULES:
 
 === Retrieved textbook text (supporting) ===
 {text_context}
-
-Answer format (follow this order):
-1. Most likely condition — state the classifier's top prediction and confidence percentage
-2. Why it may match — supporting details from the image and textbook
-3. What you can do
-4. When to see a doctor
 """
 
 
@@ -213,6 +329,8 @@ def answer_multimodal_question(
     structured_state_text = format_state_for_prompt(updated_state)
     classifier_result = classify_skin_image(image_path)
     classifier_context = format_classifier_context(classifier_result)
+    classifier_available = is_classifier_available(classifier_result)
+    classifier_lead = build_classifier_answer_lead(classifier_result, language)
 
     prompt = build_multimodal_prompt(
         question=working_question or "",
@@ -223,9 +341,11 @@ def answer_multimodal_question(
         text_context=text_context,
         classifier_context=classifier_context,
         language=language,
+        classifier_available=classifier_available,
     )
 
-    answer = run_llm(prompt)
+    llm_body = run_llm(prompt)
+    answer = merge_multimodal_answer(classifier_lead, llm_body)
     retrieval_debug = {
         "query": text_query,
         "retrieve_top_k": RETRIEVE_TOP_K,
