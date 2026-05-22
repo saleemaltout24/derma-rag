@@ -3,7 +3,7 @@ import re
 from lingua import Language, LanguageDetectorBuilder
 from sentence_transformers import CrossEncoder
 
-from backend.config import ENABLE_RERANK, RERANK_MODEL, RERANK_TOP_K, RETRIEVE_TOP_K
+from backend.config import DEBUG_PAYLOADS, ENABLE_RERANK, RERANK_MODEL, RERANK_TOP_K, RETRIEVE_TOP_K
 from backend.intent_router import general_help_response
 from backend.llm import run_llm
 from backend.prompt_template import (
@@ -399,10 +399,11 @@ def answer_medical_question(
         RETRIEVE_TOP_K,
     )
 
-    print("\n===== RETRIEVED DOCS =====")
-    for doc in retrieved_docs[:3]:
-        print(doc.get("text", "")[:300])
-        print("-----")
+    if DEBUG_PAYLOADS:
+        print("\n===== RETRIEVED DOCS =====")
+        for doc in retrieved_docs[:3]:
+            print(doc.get("text", "")[:300])
+            print("-----")
 
     docs = rerank_docs(
         search_query,
@@ -411,9 +412,10 @@ def answer_medical_question(
         user_question=working_question,
     )
 
-    print("\n===== RERANKED DOC SCORES (top 5) =====")
-    for doc in docs[:5]:
-        print(doc.get("score"), doc.get("rerank_score"), doc.get("definition_priority"))
+    if DEBUG_PAYLOADS:
+        print("\n===== RERANKED DOC SCORES (top 5) =====")
+        for doc in docs[:5]:
+            print(doc.get("score"), doc.get("rerank_score"), doc.get("definition_priority"))
 
     context = build_context_from_docs(docs)
     structured_state_text = format_state_for_prompt(updated_state)
@@ -444,8 +446,9 @@ def answer_medical_question(
             language=language,
         )
 
-    print("\n===== FINAL PROMPT =====\n")
-    print(prompt[:2000])
+    if DEBUG_PAYLOADS:
+        print("\n===== FINAL PROMPT =====\n")
+        print(prompt[:2000])
 
     answer = run_llm(prompt)
     debug = build_retrieval_debug(search_query, retrieved_docs, docs)

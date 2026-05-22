@@ -2,7 +2,7 @@ import random
 import re
 from typing import Any
 
-from backend.llm import run_llm
+from backend.llm import LLMError, run_llm
 
 
 GREETING_TOKENS = frozenset(
@@ -223,7 +223,10 @@ User message:
 
 Label:
 """
-    label = run_llm(prompt).strip().upper()
+    try:
+        label = run_llm(prompt).strip().upper()
+    except LLMError:
+        return "MEDICAL_QUESTION"
 
     if label in ALLOWED_INTENTS:
         return label

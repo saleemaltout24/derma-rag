@@ -42,6 +42,13 @@ CLASSIFIER_LABELS = [label.strip() for label in os.getenv("CLASSIFIER_LABELS", "
 USE_SQLITE_SESSIONS = os.getenv("USE_SQLITE_SESSIONS", "false").lower() == "true"
 SESSION_DB_PATH = Path(os.getenv("SESSION_DB_PATH", str(DATA_DIR / "sessions.db")))
 DEBUG_PAYLOADS = os.getenv("DEBUG_PAYLOADS", "false").lower() == "true"
+ENABLE_VISION_LLM = os.getenv("ENABLE_VISION_LLM", "false").lower() == "true"
+DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
+    if origin.strip()
+]
 
 EMBEDDING_MODEL = EMBED_MODEL
 

@@ -6,7 +6,8 @@ from pathlib import Path
 from uuid import uuid4
 from typing import Dict, List, Optional
 from fastapi.middleware.cors import CORSMiddleware
-from backend.config import DEBUG_PAYLOADS, UPLOAD_DIR
+from backend.config import CORS_ORIGINS, DEBUG_PAYLOADS, UPLOAD_DIR
+from backend.llm import LLMError
 from backend.intent_router import (
     classify_user_intent,
     general_help_response,
@@ -27,7 +28,7 @@ ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -223,7 +224,7 @@ async def chat(
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
+    except (LLMError, RuntimeError) as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -302,7 +303,7 @@ def ask(question: str, session_id: str = "default"):
             **({"retrieval_debug": retrieval_debug} if DEBUG_PAYLOADS else {}),
         }
 
-    except RuntimeError as e:
+    except (LLMError, RuntimeError) as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

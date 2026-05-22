@@ -49,7 +49,15 @@ npm run dev
 ### 5. Open browser
 Go to http://localhost:5173
 
-### 6. (Optional) Test classifier on labeled images
+### 6. Environment (optional)
+
+Copy `.env.example` to `.env`. Useful flags:
+
+- `CORS_ORIGINS` — frontend URLs allowed to call the API (default `http://localhost:5173`)
+- `DEBUG_PAYLOADS=true` — include retrieval debug in `/chat` responses and log RAG traces to the server console
+- `ENABLE_VISION_LLM=true` — run Ollama vision on uploads (requires `ollama pull llama3.2-vision`; slower)
+
+### 7. (Optional) Test classifier on labeled images
 ```bash
 # Put test images in data/eval/MEL/, data/eval/BCC/, etc.
 python scripts/eval_classifier.py
