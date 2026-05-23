@@ -1,30 +1,58 @@
 import re
+from concurrent.futures import ThreadPoolExecutor
 
-from backend.config import RERANK_TOP_K, RETRIEVE_TOP_K
+from backend.config import (
+    MAX_CONTEXT_CHARS_PER_DOC,
+    MAX_NEARBY_TEXT_CHARS,
+    MAX_TOTAL_CONTEXT_CHARS,
+    MULTIMODAL_MAX_HISTORY_TURNS,
+    MULTIMODAL_RERANK_TOP_K,
+    MULTIMODAL_RETRIEVE_TOP_K,
+    PARALLEL_GRADCAM,
+)
 from backend.skin_classifier import classify_skin_image
 from backend.image_pipeline import analyze_skin_image
 from backend.image_vector_store import search_similar_images
 from backend.rag_pipeline import detect_language, format_user_history, rerank_docs
-from backend.state_extractor import extract_structured_state
+from backend.state_extractor import extract_structured_state_for_image_upload
 from backend.state_manager import merge_state, build_search_query, format_state_for_prompt, maybe_expand_referential_question
 from backend.vector_store import search as search_text
 from backend.llm import run_llm
 
 
+def _truncate_text(text: str, max_chars: int) -> str:
+    text = (text or "").strip()
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars].rsplit(" ", 1)[0]
+    return (cut or text[:max_chars]).rstrip() + "…"
+
+
 def build_text_context(docs: list) -> str:
     parts = []
+    total = 0
     for doc in docs:
         source = doc.get("source", "Unknown source")
         section = doc.get("section_title", "Unknown section")
-        text = doc.get("text", "").strip()
+        text = _truncate_text(doc.get("text", ""), MAX_CONTEXT_CHARS_PER_DOC)
         page_start = doc.get("page_start")
         page_end = doc.get("page_end")
         if page_start is not None and page_end is not None:
             source = f"{source} (pages {page_start}-{page_end})"
         elif page_start is not None:
             source = f"{source} (page {page_start})"
-        if text:
-            parts.append(f"Source: {source}\nSection: {section}\n{text}")
+        if not text:
+            continue
+        block = f"Source: {source}\nSection: {section}\n{text}"
+        if total + len(block) > MAX_TOTAL_CONTEXT_CHARS:
+            remaining = MAX_TOTAL_CONTEXT_CHARS - total
+            if remaining < 120:
+                break
+            block = _truncate_text(block, remaining)
+        parts.append(block)
+        total += len(block) + 2
+        if total >= MAX_TOTAL_CONTEXT_CHARS:
+            break
     return "\n\n".join(parts)
 
 
@@ -39,7 +67,7 @@ def build_image_context(image_matches: list) -> str:
         disease = item.get("disease", "unknown")
         body_site = item.get("body_site", "unknown")
         caption = item.get("caption", "")
-        nearby = item.get("nearby_text", "")
+        nearby = _truncate_text(item.get("nearby_text", ""), MAX_NEARBY_TEXT_CHARS)
         source = item.get("source") or item.get("source_pdf", "unknown")
         page = item.get("page", "unknown")
         score = item.get("score")
@@ -81,6 +109,7 @@ def build_classifier_answer_lead(classifier_result: dict, language: str) -> str:
     top2_name = classifier_result.get("top2_name")
     top2_confidence = classifier_result.get("top2_confidence")
     ambiguous = classifier_result.get("ambiguous") is True
+    confusion_note = classifier_result.get("confusion_clinical_note")
     all_predictions = classifier_result.get("all_predictions", [])
 
     ranking_lines = [
@@ -106,10 +135,12 @@ def build_classifier_answer_lead(classifier_result: dict, language: str) -> str:
                 "",
                 "Bu görsel için sınıflandırıcı sıralaması:",
                 ranking,
-                "",
-                "*Yalnızca yapay zekâ taramasıdır; kesin tanı değildir. Şüpheli lezyonlar için dermatoloğa başvurun.*",
             ]
         )
+        if confusion_note:
+            lines.extend(["", f"**Önemli:** {confusion_note}"])
+        lines.append("")
+        lines.append("*Yalnızca yapay zekâ taramasıdır; kesin tanı değildir. Şüpheli lezyonlar için dermatoloğa başvurun.*")
         return "\n".join(lines)
 
     lines = [
@@ -128,10 +159,12 @@ def build_classifier_answer_lead(classifier_result: dict, language: str) -> str:
             "",
             "Classifier ranking for this image:",
             ranking,
-            "",
-            "*AI screening estimate only — not a confirmed diagnosis. See a dermatologist for any concerning lesion.*",
         ]
     )
+    if confusion_note:
+        lines.extend(["", f"**Important:** {confusion_note}"])
+    lines.append("")
+    lines.append("*AI screening estimate only — not a confirmed diagnosis. See a dermatologist for any concerning lesion.*")
     return "\n".join(lines)
 
 
@@ -165,7 +198,22 @@ def build_multimodal_prompt(
     classifier_context: str,
     language: str,
     classifier_available: bool = False,
+    confusion_note: str | None = None,
 ) -> str:
+    confusion_rules = ""
+    if confusion_note:
+        if language == "tr":
+            confusion_rules = f"""
+AK/SCC veya benzer sınıf karışıklığı uyarısı:
+{confusion_note}
+Bölüm 2'de her iki olasılığı da açıkla; SCC'yi kesinmiş gibi sunma.
+"""
+        else:
+            confusion_rules = f"""
+AK/SCC or similar-class confusion warning:
+{confusion_note}
+In section 2, explain both possibilities clearly; do not present SCC as certain if AK is plausible.
+"""
     if language == "tr":
         section_rules = (
             """
@@ -194,7 +242,7 @@ Sen hasta dostu bir dermatoloji asistanısın.
 - Sınıflandırıcı listesinde OLMAYAN hastalık adlarını KULLANMA (sınıflandırıcı varsa).
 - Kısa, anlaşılır ve pratik yaz.
 - Kullanıcıyı gereksiz korkutma.
-{section_rules}
+{section_rules}{confusion_rules}
 === SINIFLANDIRICI SONUCU (birincil kanıt — bu yükleme) ===
 {classifier_context}
 
@@ -245,7 +293,7 @@ CRITICAL RULES:
 - When the classifier is available, never use disease names outside its prediction list.
 - Keep the answer practical and easy to understand.
 - Do not scare the user unnecessarily.
-{section_rules}
+{section_rules}{confusion_rules}
 === CLASSIFIER RESULT (primary evidence — this upload only) ===
 {classifier_context}
 
@@ -284,7 +332,22 @@ def format_classifier_context(classifier_result: dict) -> str:
     ]
     for pred in all_preds:
         lines.append(f"  - {pred['name']}: {pred['confidence']:.1f}%")
+    note = classifier_result.get("confusion_clinical_note")
+    if note:
+        lines.append("")
+        lines.append(f"CONFUSION WARNING: {note}")
     return "\n".join(lines)
+
+
+def _retrieve_multimodal_text(text_query: str, working_question: str) -> tuple[list, list]:
+    retrieved_text_docs = search_text(text_query, k=MULTIMODAL_RETRIEVE_TOP_K)
+    text_docs = rerank_docs(
+        text_query,
+        retrieved_text_docs,
+        k=MULTIMODAL_RERANK_TOP_K,
+        user_question=working_question or "",
+    )
+    return retrieved_text_docs, text_docs
 
 
 def answer_multimodal_question(
@@ -295,7 +358,7 @@ def answer_multimodal_question(
     forced_language: str | None = None,
 ):
     language = forced_language if forced_language else detect_language(question or "")
-    history_text = format_user_history(history)
+    history_text = format_user_history(history, max_turns=MULTIMODAL_MAX_HISTORY_TURNS)
 
     working_question = maybe_expand_referential_question(
         question or "",
@@ -303,31 +366,24 @@ def answer_multimodal_question(
         current_state,
     )
 
-    extracted = extract_structured_state(working_question, history_text)
+    extracted = extract_structured_state_for_image_upload(working_question, history_text)
     updated_state = merge_state(current_state, extracted)
 
     image_description = analyze_skin_image(image_path)
     text_query = build_search_query(working_question or image_description, updated_state, language)
-    retrieved_text_docs = search_text(text_query, k=RETRIEVE_TOP_K)
-    text_docs = rerank_docs(
-        text_query,
-        retrieved_text_docs,
-        k=RERANK_TOP_K,
-        user_question=working_question or "",
-    )
 
-    allowed_source_pages = collect_source_pages(text_docs)
-    image_matches = search_similar_images(
-        image_path,
-        k=3,
-        body_site=updated_state.get("body_site"),
-        allowed_source_pages=allowed_source_pages,
-    )
+    body_site = updated_state.get("body_site")
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        fut_text = pool.submit(_retrieve_multimodal_text, text_query, working_question or "")
+        fut_classifier = pool.submit(classify_skin_image, image_path)
+        fut_images = pool.submit(search_similar_images, image_path, 3, body_site, None)
+        retrieved_text_docs, text_docs = fut_text.result()
+        classifier_result = fut_classifier.result()
+        image_matches = fut_images.result()
 
     image_context = build_image_context(image_matches)
     text_context = build_text_context(text_docs)
     structured_state_text = format_state_for_prompt(updated_state)
-    classifier_result = classify_skin_image(image_path)
     classifier_context = format_classifier_context(classifier_result)
     classifier_available = is_classifier_available(classifier_result)
     classifier_lead = build_classifier_answer_lead(classifier_result, language)
@@ -342,14 +398,30 @@ def answer_multimodal_question(
         classifier_context=classifier_context,
         language=language,
         classifier_available=classifier_available,
+        confusion_note=classifier_result.get("confusion_clinical_note"),
     )
 
-    llm_body = run_llm(prompt)
+    heatmap_b64 = None
+    class_idx = classifier_result.get("predicted_class_index")
+    if class_idx is not None and class_idx < 0:
+        class_idx = None
+
+    if PARALLEL_GRADCAM and classifier_available:
+        from backend.gradcam import generate_gradcam
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fut_llm = pool.submit(run_llm, prompt)
+            fut_cam = pool.submit(generate_gradcam, image_path, class_idx)
+            llm_body = fut_llm.result()
+            heatmap_b64 = fut_cam.result()
+    else:
+        llm_body = run_llm(prompt)
+
     answer = merge_multimodal_answer(classifier_lead, llm_body)
     retrieval_debug = {
         "query": text_query,
-        "retrieve_top_k": RETRIEVE_TOP_K,
-        "rerank_top_k": RERANK_TOP_K,
+        "retrieve_top_k": MULTIMODAL_RETRIEVE_TOP_K,
+        "rerank_top_k": MULTIMODAL_RERANK_TOP_K,
         "retrieved_count": len(retrieved_text_docs),
         "selected_count": len(text_docs),
         "selected_sources": [
@@ -372,6 +444,7 @@ def answer_multimodal_question(
         text_docs,
         classifier_result,
         retrieval_debug,
+        heatmap_b64,
     )
 
 

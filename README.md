@@ -63,6 +63,14 @@ Copy `.env.example` to `.env`. Useful flags:
 python scripts/eval_classifier.py
 ```
 
+### 7. (Optional) Retrain classifier (v3)
+See `data/isic2019/README.md` for download steps, then:
+```bash
+python scripts/prepare_isic2019.py
+python scripts/train_skin_classifier.py
+```
+Uses class weights + patient-level split. Output: `models/skin_classifier_v3.pth` (used automatically if present).
+
 ## Notes
 - data/vectorstore/ and processed/ folders must be present (get from project owner)
 - data/textbook_images/ folder must be present (get from project owner)

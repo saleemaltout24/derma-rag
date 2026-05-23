@@ -3,7 +3,7 @@ from typing import Any
 
 import ollama
 
-from backend.config import CHAT_MODEL
+from backend.config import CHAT_MODEL, LLM_NUM_CTX, LLM_NUM_PREDICT
 
 
 class LLMError(RuntimeError):
@@ -22,6 +22,8 @@ def run_llm(prompt: str, model: str | None = None) -> str:
             messages=[{"role": "user", "content": prompt}],
             options={
                 "temperature": 0.2,
+                "num_predict": LLM_NUM_PREDICT,
+                "num_ctx": LLM_NUM_CTX,
             },
         )
         return response["message"]["content"].strip()

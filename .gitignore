@@ -13,6 +13,9 @@ data/uploads/
 # Training / eval images (folder layout tracked via .gitkeep)
 data/ham10000/*
 !data/ham10000/.gitkeep
+data/isic2019/**
+!data/isic2019/.gitkeep
+!data/isic2019/README.md
 data/eval/**/*.jpg
 data/eval/**/*.jpeg
 data/eval/**/*.png

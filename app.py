@@ -165,6 +165,7 @@ async def chat(
                 text_docs,
                 classifier_result,
                 retrieval_debug,
+                heatmap_b64,
             ) = answer_multimodal_question(
                 question=question,
                 image_path=temp_path,
@@ -178,12 +179,13 @@ async def chat(
             history.append({"role": "assistant", "content": answer})
             persist_session_data(session_id, chat_sessions, session_state, session_languages)
 
-            from backend.gradcam import generate_gradcam
+            if heatmap_b64 is None:
+                from backend.gradcam import generate_gradcam
 
-            class_idx = classifier_result.get("predicted_class_index")
-            if class_idx is not None and class_idx < 0:
-                class_idx = None
-            heatmap_b64 = generate_gradcam(temp_path, class_idx=class_idx)
+                class_idx = classifier_result.get("predicted_class_index")
+                if class_idx is not None and class_idx < 0:
+                    class_idx = None
+                heatmap_b64 = generate_gradcam(temp_path, class_idx=class_idx)
 
             response_payload = {
                 "session_id": session_id,

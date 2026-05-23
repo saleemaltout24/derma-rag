@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+from backend.config import SKIP_STATE_LLM_ON_IMAGE
 from backend.llm import run_json_llm
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,17 @@ def _list_of_strings(value: Any) -> list[str]:
             if s:
                 out.append(s)
     return out
+
+
+def extract_structured_state_for_image_upload(message: str, history_text: str = "") -> dict[str, Any]:
+    """Fast path for image uploads: skip LLM JSON extraction unless disabled via env."""
+    if SKIP_STATE_LLM_ON_IMAGE:
+        state = dict(EXTRACTION_SCHEMA_EXAMPLE)
+        state["question_goal"] = "diagnosis_question"
+        if message.strip():
+            state["notes"] = [message.strip()[:200]]
+        return state
+    return extract_structured_state(message, history_text)
 
 
 def extract_structured_state(message: str, history_text: str = "") -> dict[str, Any]:

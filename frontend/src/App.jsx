@@ -301,6 +301,7 @@ export default function App() {
                       tier === "high" ? "bg-green-500" : tier === "medium" ? "bg-yellow-500" : "bg-red-500";
                     const showLowWarning = classification.ambiguous === true || tier === "low";
                     const showMediumInfo = !showLowWarning && tier === "medium";
+                    const confusionNote = classification.confusion_clinical_note;
                     const runnerUp =
                       classification.top2_name != null && classification.top2_name !== "";
 
@@ -327,7 +328,18 @@ export default function App() {
                             </div>
                           )}
                         </div>
-                        {showLowWarning && (
+                        {confusionNote && (
+                          <div
+                            className={`rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
+                              darkMode
+                                ? "border-orange-600/70 bg-orange-950/50 text-orange-100"
+                                : "border-orange-400 bg-orange-50 text-orange-950"
+                            }`}
+                          >
+                            ⚠️ {confusionNote}
+                          </div>
+                        )}
+                        {showLowWarning && !confusionNote && (
                           <div
                             className={`rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
                               darkMode

@@ -1,8 +1,12 @@
+import os
+
 import torch
 import torch.nn as nn
 from torchvision import transforms, models
 from PIL import Image, ImageOps
 from pathlib import Path
+
+from backend.config import CLASSIFIER_TTA_VIEWS, CONFUSION_MARGIN_THRESHOLD
 
 CLASSES = ["MEL", "NV", "BCC", "AK", "BKL", "DF", "VASC", "SCC"]
 CLASS_NAMES = {
@@ -16,8 +20,21 @@ CLASS_NAMES = {
     "SCC": "Squamous Cell Carcinoma",
 }
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "skin_classifier_v2.pth"
+_MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+_V3 = _MODELS_DIR / "skin_classifier_v3.pth"
+_V2 = _MODELS_DIR / "skin_classifier_v2.pth"
+_DEFAULT_WEIGHTS = _V3 if _V3.is_file() else _V2
+MODEL_PATH = Path(os.getenv("SKIN_CLASSIFIER_PATH", str(_DEFAULT_WEIGHTS)))
 device = torch.device("cpu")
+
+# Classes that often look alike on dermoscopy (model confuses them).
+CONFUSION_PAIRS = {
+    frozenset({"AK", "SCC"}),
+    frozenset({"AK", "BKL"}),
+    frozenset({"BCC", "SCC"}),
+    frozenset({"VASC", "BKL"}),
+    frozenset({"MEL", "NV"}),
+}
 
 # ImageNet normalize after letterbox (same for classifier + GradCAM).
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -63,13 +80,14 @@ def load_model_tensor(image_path: str) -> torch.Tensor:
 
 
 def _tta_pil_variants(pil: Image.Image) -> list[Image.Image]:
-    """Four views: original, horizontal flip, vertical flip, both."""
-    return [
+    """TTA views: 1 = original only; 4 = original + flips (slower, slightly more accurate)."""
+    variants = [
         pil,
         pil.transpose(Image.FLIP_LEFT_RIGHT),
         pil.transpose(Image.FLIP_TOP_BOTTOM),
         pil.transpose(Image.ROTATE_180),
     ]
+    return variants[:CLASSIFIER_TTA_VIEWS]
 
 
 def _uncertainty_fields() -> dict:
@@ -123,6 +141,59 @@ def _confidence_tier(top_pct: float) -> str:
     return "low"
 
 
+def _score_by_code(results: list[dict]) -> dict[str, float]:
+    return {r["code"]: float(r["confidence"]) for r in results}
+
+
+def _confusion_pair_fields(results: list[dict], top: dict, second: dict, margin: float) -> dict:
+    """Mark clinically similar classes when scores are close (e.g. AK mistaken for SCC)."""
+    top_code = top["code"]
+    second_code = second["code"]
+    scores = _score_by_code(results)
+    extra: dict = {}
+
+    ak = scores.get("AK", 0.0)
+    scc = scores.get("SCC", 0.0)
+    ak_scc_gap = abs(ak - scc)
+    if ak > 0 and scc > 0 and ak_scc_gap < CONFUSION_MARGIN_THRESHOLD:
+        extra["confusion_pair"] = ["AK", "SCC"]
+        extra["confusion_clinical_note"] = (
+            "Actinic keratosis (AK) and squamous cell carcinoma (SCC) often look very similar. "
+            "The AI frequently confuses them. If the lesion may be AK, do not treat SCC as certain — "
+            "a dermatologist can tell them apart; biopsy is sometimes needed."
+        )
+        extra["ambiguous"] = True
+        if top_code == "SCC" and ak >= 10.0:
+            extra["ak_alternative_likely"] = True
+        elif top_code == "AK" and scc >= 10.0:
+            extra["scc_alternative_likely"] = True
+        return extra
+
+    # Model very confident on SCC but AK score tiny — still flag for demos / clinical AK photos.
+    if top_code == "SCC" and scc >= 55.0 and ak < 15.0:
+        extra["confusion_clinical_note"] = (
+            f"The model is confident about squamous cell carcinoma ({scc:.1f}%) but gives actinic keratosis "
+            f"only {ak:.1f}%. AK and SCC are related (AK is sun damage that can sometimes progress to SCC) "
+            f"and often look alike — the AI often calls AK lesions SCC. If this lesion is clinically actinic "
+            f"keratosis, trust examination or biopsy over this score."
+        )
+        extra["ak_scc_overcall_warning"] = True
+        if extra.get("confidence_tier") == "high":
+            extra["confidence_tier"] = "medium"
+        return extra
+
+    pair = frozenset({top_code, second_code})
+    if pair in CONFUSION_PAIRS and margin < CONFUSION_MARGIN_THRESHOLD:
+        other_name = CLASS_NAMES.get(second_code, second_code)
+        extra["confusion_pair"] = [top_code, second_code]
+        extra["confusion_clinical_note"] = (
+            f"{top['name']} and {other_name} can look similar on dermoscopy. "
+            f"The margin between them is only {margin:.1f}% — consider both."
+        )
+        extra["ambiguous"] = True
+    return extra
+
+
 def classify_skin_image(image_path: str) -> dict:
     model, err = get_skin_classifier_model()
     if model is None:
@@ -168,6 +239,11 @@ def classify_skin_image(image_path: str) -> dict:
             "top2_name": second["name"],
             "top2_confidence": second["confidence"] if second["name"] is not None else 0.0,
         }
+        extra.update(_confusion_pair_fields(results, top, second, margin))
+        if extra.get("ambiguous"):
+            extra["confidence_tier"] = "low" if margin < 15.0 else extra["confidence_tier"]
+            if extra.get("confusion_clinical_note") and extra["confidence_tier"] == "high":
+                extra["confidence_tier"] = "medium"
 
         return {
             "predicted_class": top["code"],
