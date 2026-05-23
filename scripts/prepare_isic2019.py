@@ -32,7 +32,8 @@ ISIC_LABEL_TO_CLASS = {
     "MEL": "MEL",
     "NV": "NV",
     "BCC": "BCC",
-    "AKIEC": "AK",
+    "AK": "AK",  # ISIC 2019 Training_GroundTruth.csv column name
+    "AKIEC": "AK",  # older exports / HAM10000 naming
     "BKL": "BKL",
     "DF": "DF",
     "VASC": "VASC",
