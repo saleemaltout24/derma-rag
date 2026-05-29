@@ -115,7 +115,8 @@ def get_skin_classifier_model() -> tuple[nn.Module | None, str | None]:
         print(f"[Classifier] {_unavailable_reason}")
         return None, _unavailable_reason
     try:
-        print("[Classifier] Loading skin disease classifier v2...")
+        label = MODEL_PATH.name
+        print(f"[Classifier] Loading weights: {MODEL_PATH}")
         m = models.efficientnet_b0(weights=None)
         m.classifier[1] = nn.Linear(m.classifier[1].in_features, len(CLASSES))
         try:
@@ -125,7 +126,9 @@ def get_skin_classifier_model() -> tuple[nn.Module | None, str | None]:
         m.load_state_dict(checkpoint["model_state_dict"])
         m.eval()
         _model = m
-        print("[Classifier] Classifier v2 ready.")
+        val_acc = checkpoint.get("val_accuracy") if isinstance(checkpoint, dict) else None
+        extra = f" (checkpoint val acc {val_acc:.2f}%)" if val_acc is not None else ""
+        print(f"[Classifier] Ready: {label}{extra}")
         return _model, None
     except Exception as e:
         _unavailable_reason = str(e)
