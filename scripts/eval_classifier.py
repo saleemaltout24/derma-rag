@@ -12,6 +12,7 @@ Run from project root:
   python scripts/eval_classifier.py path/to/your/eval/folder
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -19,7 +20,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from backend.skin_classifier import CLASS_NAMES, CLASSES, classify_skin_image
+V3_WEIGHTS = ROOT / "models" / "skin_classifier_v3.pth"
+if not V3_WEIGHTS.is_file():
+    print(f"Missing weights: {V3_WEIGHTS}")
+    print("Train v3 first (see data/isic2019/README.md or notebooks/Colab_Train_Skin_Classifier_v3.ipynb).")
+    sys.exit(1)
+
+os.environ["SKIN_CLASSIFIER_PATH"] = str(V3_WEIGHTS.resolve())
+
+from backend.skin_classifier import CLASS_NAMES, CLASSES, MODEL_PATH, classify_skin_image
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
@@ -49,6 +58,9 @@ def main() -> None:
         print(f"No images found under {eval_dir}")
         print("Add photos inside folders named: " + ", ".join(CLASSES))
         sys.exit(1)
+
+    print(f"Weights: {MODEL_PATH}")
+    print()
 
     correct = sum(1 for r in rows if r[4])
     total = len(rows)
