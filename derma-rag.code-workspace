@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "name": "derma-rag",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/__pycache__": true
+    }
+  }
+}

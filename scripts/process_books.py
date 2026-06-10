@@ -46,6 +46,9 @@ def clean_text(text: str) -> str:
     text = text.replace("\u2014", "-")
     text = text.replace("\ufb01", "fi")
     text = text.replace("\ufb02", "fl")
+    # Strip PDF internal reference codes (e.g. /H18546, /H17039) left by pypdf
+    # These are encoding artifacts for special characters (bullets, arrows, etc.)
+    text = re.sub(r"/H\d{4,6}\s*", "", text)
     return text.strip()
 
 
@@ -280,14 +283,18 @@ def is_editorial_directory_paragraph(p: str) -> bool:
     if re.match(r"(?is)^contributors\s*\n", p.strip()):
         return True
     lines = [ln for ln in p.split("\n") if ln.strip()]
-    if len(lines) < 12:
+    if len(lines) < 4:
         return False
     degree_hits = sum(
         1
         for ln in lines
-        if re.search(r"\b(MD|PhD|FRCP|MBA|BSc|MB\s+ChB|DPhil|DMSc)\b", ln)
+        if re.search(r"\b(MD|PhD|FRCP|FRCPI|FRCPC|FRCPATH|FRCPCH|MBA|BSc|MB\s+ChB|MB\s+BS|DPhil|DMSc|FAAD|FAAP|CPsychol)\b", ln)
     )
     chapter_tail = sum(1 for ln in lines if re.search(r"\bChapters?\s+[\d,\s-]+\s*$", ln))
+    # Wide net: a few lines each → catches split contributor blocks
+    if degree_hits >= 3 and chapter_tail >= 1:
+        return True
+    # Strict: very long blocks (full list not yet chunked)
     if degree_hits >= 10 and chapter_tail >= 3:
         return True
     return False
@@ -299,9 +306,85 @@ def is_boilerplate_or_marketing_paragraph(p: str) -> bool:
         return True
     if re.search(r"(?is)online edition\s+included\s+with\s+book\s+purchase", pl):
         return True
-    if len(p) < 260 and "isbn" in pl and ("wiley" in pl or "copyright" in pl):
+    # Removed the len() guards — long boilerplate blocks must also be caught
+    if "isbn" in pl and ("wiley" in pl or "copyright" in pl):
         return True
-    if len(p) < 400 and "all rights reserved" in pl and "wiley" in pl:
+    if "all rights reserved" in pl and ("wiley" in pl or "john wiley" in pl):
+        return True
+    if "www.rooksdermatology.com" in pl:
+        return True
+    if "rook" in pl and "textbook" in pl and "ninth edition" in pl:
+        return True
+    # WHO / IARC front matter
+    if "iarc press" in pl and ("world health organization" in pl or "who press" in pl):
+        return True
+    if "international agency for research on cancer" in pl and "all rights reserved" in pl:
+        return True
+    return False
+
+
+def is_conflict_of_interest_paragraph(p: str) -> bool:
+    """Remove conflict of interest, funding, and acknowledgement blocks from guidelines."""
+    pl = p.lower().strip()
+    head = pl[:300]
+    # Conflict of interest declarations
+    if re.match(r"(?i)^conflict(s)?\s+of\s+interest", pl):
+        return True
+    if re.match(r"(?i)^(potential\s+)?competing\s+interest", pl):
+        return True
+    if re.match(r"(?i)^disclosures?\b", pl):
+        return True
+    if re.match(r"(?i)^çıkar\s+(çatışması|ilişkisi)", pl):
+        return True
+    # Funding / acknowledgements
+    if re.match(r"(?i)^funding\b", pl) and len(p) < 1200:
+        return True
+    if re.match(r"(?i)^acknowledgements?\b", pl) and len(p) < 1200:
+        return True
+    if re.match(r"(?i)^te[sş]ekkür\b", pl) and len(p) < 1200:
+        return True
+    if re.match(r"(?i)^finansman\b", pl) and len(p) < 1200:
+        return True
+    # Journal metadata blocks (DOI, received/accepted dates, correspondence)
+    if re.match(r"(?i)^(received|accepted|published online|doi:)\b", pl) and len(p) < 600:
+        return True
+    if re.match(r"(?i)^(geliş tarihi|kabul tarihi|yayımlanma)\b", pl) and len(p) < 600:
+        return True
+    # Correspondence / author info blocks
+    if re.match(r"(?i)^correspondence\b", pl) and len(p) < 600:
+        return True
+    if re.match(r"(?i)^(yazışma adresi|iletişim)\b", pl) and len(p) < 600:
+        return True
+    # Open access / copyright notices common in AAD/EDF guidelines
+    if "open access" in head and ("creative commons" in head or "cc by" in head):
+        return True
+    if re.match(r"(?i)^copyright\s+©", pl) and len(p) < 400:
+        return True
+    # Author contribution statements
+    if re.match(r"(?i)^author contributions?\b", pl) and len(p) < 800:
+        return True
+    if re.match(r"(?i)^yazar(lar(ın)?)?\s+katkı", pl) and len(p) < 800:
+        return True
+    # Data availability statements
+    if re.match(r"(?i)^data\s+availability\b", pl) and len(p) < 600:
+        return True
+    return False
+
+
+def is_guideline_methods_paragraph(p: str) -> bool:
+    """
+    Remove guideline methodology sections (how the guideline was written).
+    These describe the evidence review process, not clinical content.
+    """
+    pl = p.lower().strip()
+    head = pl[:200]
+    if re.match(r"(?i)^methods?\b", head) and re.search(
+        r"(?i)(systematic review|evidence.based|literature search|pubmed|medline|grade)", p
+    ):
+        return True
+    if re.match(r"(?i)^(arama stratejisi|yöntem)\b", head) and re.search(
+        r"(?i)(sistematik|kanıta dayalı|literatür)", p
+    ):
         return True
     return False
 
@@ -428,7 +511,11 @@ def filter_and_clean_paragraphs(paragraphs: list[str]) -> list[str]:
             continue
         if is_toc_heavy_paragraph(p):
             continue
-        if is_boilerplate_or_marketing_paragraph(p) and len(p) < 500:
+        if is_boilerplate_or_marketing_paragraph(p):
+            continue
+        if is_conflict_of_interest_paragraph(p):
+            continue
+        if is_guideline_methods_paragraph(p):
             continue
         p = strip_running_header_lines(p)
         p = remove_figure_caption_lines(p)
@@ -462,9 +549,21 @@ def is_heading(paragraph: str) -> bool:
     if "\n" not in p and len(p) <= 120:
         if re.match(r"^\d+(\.\d+)*\s+[A-ZÇĞİÖŞÜ]", p):
             return True
+        # All-caps single-line heading (Fitzpatrick style: CLINICAL MANIFESTATION)
         if re.match(r"^[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9 \-,:()/]{3,}$", p):
             return True
         if p.endswith(":") and len(p) < 80:
+            return True
+        # Rook's/mixed-case short section headers that are standalone paragraphs
+        # e.g. "Growth of rational medicine", "early Islamic medicine and dermatology"
+        # Heuristic: short, no sentence-ending punctuation, no digits, looks like a title
+        if (
+            3 <= len(p) <= 90
+            and not re.search(r"[.!?,;]", p)
+            and not re.search(r"\d", p)
+            and len(p.split()) <= 8
+            and re.match(r"^[A-Za-zÇĞİÖŞÜçğışöü]", p)
+        ):
             return True
 
     if "\n" in p and len(p) <= 220:
@@ -553,6 +652,15 @@ def build_semantic_chunks(paragraphs: list[str]) -> list[dict]:
                     })
 
                     overlap = current_chunk[-OVERLAP_CHARS:] if len(current_chunk) > OVERLAP_CHARS else current_chunk
+                    # Clip overlap to a word/line boundary so chunks never start mid-word
+                    if overlap and not overlap[0].isspace():
+                        first_break = -1
+                        for brk_char in (" ", "\n"):
+                            pos = overlap.find(brk_char)
+                            if pos != -1 and (first_break == -1 or pos < first_break):
+                                first_break = pos
+                        if first_break != -1 and first_break < 40:
+                            overlap = overlap[first_break:].lstrip()
                     current_chunk = f"{overlap}\n\n{paragraph}".strip()
                 else:
                     chunks.append({
@@ -639,6 +747,12 @@ def discard_chunk_if_noise(text: str, section_title: str) -> bool:
         return True
     if is_reference_paragraph(t):
         return True
+    if is_boilerplate_or_marketing_paragraph(t):
+        return True
+    if is_conflict_of_interest_paragraph(t):
+        return True
+    if is_guideline_methods_paragraph(t):
+        return True
     return False
 
 
@@ -664,10 +778,21 @@ def extract_pdf_text(pdf_path: Path) -> str:
     return clean_text(raw)
 
 
+def extract_txt_text(txt_path: Path) -> str:
+    """Read a plain-text file (e.g. OCR output) and return cleaned text."""
+    with open(txt_path, encoding="utf-8") as f:
+        raw = f.read()
+    raw = join_hyphenated_line_breaks(raw)
+    raw = fix_common_pdf_space_splits(raw)
+    return clean_text(raw)
+
+
 def main():
     print(f"Looking for PDFs in: {INPUT_DIR}")
     pdf_files = list(INPUT_DIR.glob("*.pdf"))
-    print(f"Found {len(pdf_files)} PDF file(s).")
+    txt_files = list(INPUT_DIR.glob("*.txt"))
+    all_files = pdf_files + txt_files
+    print(f"Found {len(pdf_files)} PDF file(s) and {len(txt_files)} TXT file(s).")
 
     if not pdf_files:
         print("No PDF files found.")
@@ -678,11 +803,14 @@ def main():
     all_chunks = []
     global_chunk_id = 1
 
-    for pdf_file in pdf_files:
+    for pdf_file in all_files:
         print(f"\nProcessing: {pdf_file.name}")
 
         book_language = detect_book_language(pdf_file.name)
-        text = extract_pdf_text(pdf_file)
+        if pdf_file.suffix == ".txt":
+            text = extract_txt_text(pdf_file)
+        else:
+            text = extract_pdf_text(pdf_file)
 
         if not text:
             print(f"  No extractable text found in {pdf_file.name}")

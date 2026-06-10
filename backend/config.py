@@ -38,8 +38,8 @@ RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "5"))
 MULTIMODAL_RETRIEVE_TOP_K = int(os.getenv("MULTIMODAL_RETRIEVE_TOP_K", "12"))
 MULTIMODAL_RERANK_TOP_K = int(os.getenv("MULTIMODAL_RERANK_TOP_K", "3"))
 MULTIMODAL_MAX_HISTORY_TURNS = int(os.getenv("MULTIMODAL_MAX_HISTORY_TURNS", "4"))
-MAX_CONTEXT_CHARS_PER_DOC = int(os.getenv("MAX_CONTEXT_CHARS_PER_DOC", "600"))
-MAX_TOTAL_CONTEXT_CHARS = int(os.getenv("MAX_TOTAL_CONTEXT_CHARS", "3500"))
+MAX_CONTEXT_CHARS_PER_DOC = int(os.getenv("MAX_CONTEXT_CHARS_PER_DOC", "1200"))
+MAX_TOTAL_CONTEXT_CHARS = int(os.getenv("MAX_TOTAL_CONTEXT_CHARS", "7000"))
 MAX_NEARBY_TEXT_CHARS = int(os.getenv("MAX_NEARBY_TEXT_CHARS", "400"))
 RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 ENABLE_RERANK = os.getenv("ENABLE_RERANK", "true").lower() == "true"
@@ -51,8 +51,8 @@ CLASSIFIER_TTA_VIEWS = max(1, min(4, int(os.getenv("CLASSIFIER_TTA_VIEWS", "4"))
 CONFUSION_MARGIN_THRESHOLD = float(os.getenv("CONFUSION_MARGIN_THRESHOLD", "25"))
 # Run Grad-CAM while the main LLM generates sections 2–4.
 PARALLEL_GRADCAM = os.getenv("PARALLEL_GRADCAM", "true").lower() == "true"
-LLM_NUM_PREDICT = int(os.getenv("LLM_NUM_PREDICT", "450"))
-LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "4096"))
+LLM_NUM_PREDICT = int(os.getenv("LLM_NUM_PREDICT", "600"))
+LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
 ENABLE_CLASSIFIER = os.getenv("ENABLE_CLASSIFIER", "false").lower() == "true"
 CLASSIFIER_MODEL_PATH = os.getenv("CLASSIFIER_MODEL_PATH", "")
 CLASSIFIER_LABELS = [label.strip() for label in os.getenv("CLASSIFIER_LABELS", "").split(",") if label.strip()]

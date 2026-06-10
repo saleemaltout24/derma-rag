@@ -3,28 +3,66 @@ from typing import Any
 
 
 def looks_like_definition_question(message: str) -> bool:
-    """Heuristic: user wants a concept definition (improves embedding query)."""
+    """
+    Heuristic: user is asking about a medical concept — definition, cause,
+    diagnosis, symptoms, or treatment — so the lexical scan should run.
+    """
     t = message.strip().lower()
     if not t:
         return False
+    # Standard definitional patterns
     if re.search(
         r"\b(what\s+is|what\'?s|what\s+are|define|definition(\s+of)?|meaning(\s+of)?)\b",
         t,
     ):
         return True
+    # Causal / diagnostic / clinical questions — all need entity-focused retrieval
     if re.search(
-        r"\b(nedir|tanımı|tanım(\s+nedir)?|tanımla|anlamı|ne\s+demek)\b",
+        r"\b(what\s+causes?|how\s+is|how\s+are|how\s+do(?:es)?|what\s+triggers?|"
+        r"what\s+are\s+the\s+(symptoms?|signs?|causes?|treatments?|features?)|"
+        r"how\s+is\s+\w+\s+diagnosed|how\s+do\s+you\s+(treat|diagnose))\b",
+        t,
+    ):
+        return True
+    # Turkish patterns
+    if re.search(
+        r"\b(nedir|tanımı|tanım(\s+nedir)?|tanımla|anlamı|ne\s+demek|"
+        r"belirtileri|nedeni|nedenleri|teşhis|tedavisi)\b",
         t,
     ):
         return True
     return False
 
 
+# ── regex patterns for entity extraction ────────────────────────────────────
+
 _DEF_FOCUS_EN = re.compile(
     r"\b(?:what\s+is|what\'?s|define|definition\s+of|meaning\s+of)\s+(?:the\s+)?(.+?)\s*\??\s*$",
     re.I,
 )
 _DEF_FOCUS_TR = re.compile(r"^(.+?)\s+nedir\s*\??\s*$", re.I)
+
+# "What causes X?" / "What triggers X?"
+_CAUSE_FOCUS_EN = re.compile(
+    r"\bwhat\s+(?:causes?|triggers?)\s+(.+?)\s*\??\s*$",
+    re.I,
+)
+# "How is X diagnosed?" / "How is X treated?"
+_HOW_FOCUS_EN = re.compile(
+    r"\bhow\s+(?:is|are|do(?:es)?|do\s+you)\s+(?:the\s+)?(.+?)\s+"
+    r"(?:diagnosed|treated|diagnosed\s+and\s+treated)\s*\??\s*$",
+    re.I,
+)
+# "What are the symptoms/signs/causes/features of X?"
+_OF_FOCUS_EN = re.compile(
+    r"\bwhat\s+are\s+the\s+(?:symptoms?|signs?|causes?|features?|treatments?)\s+of\s+(.+?)\s*\??\s*$",
+    re.I,
+)
+# "What is the treatment for X?"
+_TREATMENT_FOCUS_EN = re.compile(
+    r"\bwhat\s+is\s+the\s+(?:treatment|management|therapy)\s+for\s+(.+?)\s*\??\s*$",
+    re.I,
+)
 
 _REF_PRON_EN = re.compile(
     r"\b(it|this|that|them|they|these|those)\b",
@@ -34,24 +72,44 @@ _REF_PRON_TR = re.compile(r"\b(bu|şu|bunlar|şunlar|onlar)\b", re.I)
 
 
 def extract_definition_focus(user_question: str) -> str | None:
-    """Trailing noun phrase from definitional questions, e.g. 'What is acne?' -> 'acne'."""
-    q = (user_question or "").strip().lower()
-    if not q:
-        return None
-    m = _DEF_FOCUS_EN.search(q)
-    if m:
-        focus = m.group(1).strip()
-    else:
-        m = _DEF_FOCUS_TR.match(q)
-        if not m:
+    """
+    Extract the medical condition/entity from any knowledge question.
+    Returns the condition name (e.g. 'rosacea', 'melanoma', 'contact dermatitis')
+    so the lexical scan can find the most relevant chunks.
+    """
+    q = (user_question or "").strip()
+    q_lower = q.lower()
+
+    def _clean(focus: str) -> str | None:
+        focus = re.sub(r"^the\s+", "", focus, flags=re.I).strip("?.! ")
+        if len(focus) < 2 or focus.lower() in {"skin", "this", "that", "it", "bu"}:
             return None
-        focus = m.group(1).strip()
-    focus = re.sub(r"^the\s+", "", focus).rstrip("?.! ")
-    if len(focus) < 2 or focus in {"skin", "this", "that", "it", "bu"}:
-        return None
-    if any(x in focus for x in (" and ", " vs ", " versus ", " ve ", " ile ")):
-        return None
-    return focus
+        if any(x in focus.lower() for x in (" and ", " vs ", " versus ", " ve ", " ile ")):
+            return None
+        return focus.lower()
+
+    # Try each pattern in priority order
+    for pattern in (
+        _TREATMENT_FOCUS_EN,   # "What is the treatment for X?" → X
+        _OF_FOCUS_EN,          # "What are the symptoms of X?" → X
+        _CAUSE_FOCUS_EN,       # "What causes X?" → X
+        _HOW_FOCUS_EN,         # "How is X diagnosed?" → X
+        _DEF_FOCUS_EN,         # "What is X?" → X
+    ):
+        m = pattern.search(q)
+        if m:
+            result = _clean(m.group(1).strip())
+            if result:
+                return result
+
+    # Turkish: "X nedir?"
+    m = _DEF_FOCUS_TR.match(q)
+    if m:
+        result = _clean(m.group(1).strip())
+        if result:
+            return result
+
+    return None
 
 
 def _message_has_referential_pronoun(message: str) -> bool:
@@ -216,10 +274,18 @@ def build_search_query(user_message: str, state: dict[str, Any], language: str) 
     q = q_raw.lower() if q_raw else ""
 
     if looks_like_definition_question(q_raw):
-        if language == "tr":
-            add("tanım dermatoloji")
+        focus = extract_definition_focus(q_raw)
+        if focus:
+            # Entity-first query: "acne vulgaris dermatology" beats
+            # "definition dermatology what is acne?" because the embedding
+            # stays near the specific concept, not generic "definition" content.
+            suffix = "dermatoloji" if language == "tr" else "dermatology"
+            add(f"{focus} {suffix}")
         else:
-            add("definition dermatology")
+            if language == "tr":
+                add("tanım dermatoloji")
+            else:
+                add("definition dermatology")
 
     if q:
         add(q)

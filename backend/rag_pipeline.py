@@ -53,19 +53,69 @@ def format_user_history(history: list, max_turns: int = 8) -> str:
 
 
 def chunk_matches_definition_focus(focus: str, text: str) -> bool:
-    """True if every meaningful token in *focus* appears as a whole word in *text*."""
+    """
+    True if the chunk is genuinely *about* the focus concept, not just mentions it.
+
+    Requirements (any one suffices):
+    - Focus term appears in the first 300 chars (chunk opens with the topic), OR
+    - Focus term appears 3+ times (chunk is densely about it)
+
+    This prevents pigmentation/treatment chunks that list "acne" once among many
+    conditions (e.g. "can develop with acne, psoriasis, lichen planus") from
+    ranking as relevant for "what is acne?".
+    """
     if not focus or not text:
         return False
     t = (text or "").lower()
     tokens = [p for p in re.split(r"\s+", focus.strip().lower()) if len(p) >= 2]
     if not tokens:
         tokens = [focus.strip().lower()]
+
+    # All tokens must appear somewhere (basic filter)
     for tok in tokens:
         if len(tok) == 2 and not tok.isalpha():
             continue
         if not re.search(rf"\b{re.escape(tok)}\b", t, re.I):
             return False
-    return True
+
+    # Topicality check: focus must LEAD the chunk OR appear densely.
+    # 40 chars = roughly the first half-sentence. "This disfiguring pigmentation
+    # can develop with acne..." has "acne" at ~50 chars → correctly excluded.
+    # "Acne vulgaris is a chronic..." has "acne" at 0 → correctly included.
+    primary_tok = max(tokens, key=len)  # most specific token
+    in_opening = bool(re.search(rf"\b{re.escape(primary_tok)}\b", t[:40], re.I))
+    frequency = len(re.findall(rf"\b{re.escape(primary_tok)}\b", t, re.I))
+    return in_opening or frequency >= 4
+
+
+def _lexical_scan_for_focus(focus: str, k: int = 10) -> list[dict]:
+    """
+    Scan ALL loaded chunks for ones that are genuinely about `focus`.
+    This bypasses FAISS embedding limitations: chunks whose text starts with
+    noisy headers (e.g. 'PART I DISORDERS...') may embed far from the query
+    even though they contain the best definition.
+
+    Returns up to k chunks sorted by: leads-with-focus first, then density.
+    """
+    from backend.vector_store import chunks as all_chunks
+    focus_l = focus.strip().lower()
+    primary_tok = max(focus_l.split(), key=len) if focus_l.split() else focus_l
+
+    results = []
+    for c in all_chunks:
+        t = _clean_chunk_text((c.get("text") or "")).lower()
+        if not t:
+            continue
+        if not re.search(rf"\b{re.escape(primary_tok)}\b", t, re.I):
+            continue
+        freq = len(re.findall(rf"\b{re.escape(primary_tok)}\b", t, re.I))
+        leads = bool(re.search(rf"\b{re.escape(primary_tok)}\b", t[:80], re.I))
+        score = (2 if leads else 0) + min(freq, 8)
+        if score >= 2:  # must either lead OR appear 2+ times
+            results.append((score, c))
+
+    results.sort(key=lambda x: -x[0])
+    return [dict(c) for _, c in results[:k]]
 
 
 def refine_docs_for_definition_retrieval(
@@ -74,9 +124,15 @@ def refine_docs_for_definition_retrieval(
     retrieve_k: int,
 ) -> list[dict]:
     """
-    Hybrid recall: dense retrieval often misses the right entity; for definitional
-    questions, prefer chunks that literally contain the asked concept, and optionally
-    run a second dense query focused on that concept.
+    Hybrid recall for definitional questions.
+
+    Strategy:
+      1. Lexical scan: find chunks that are genuinely *about* the focus term,
+         regardless of their FAISS distance (fixes noisy-header embedding problem).
+      2. FAISS booster: run a second dense search focused on the entity.
+      3. Merge all three pools (original FAISS + lexical + booster), deduped.
+      4. Rank-boost: topically-matching chunks first, then rest.
+      5. Always return retrieve_k so the cross-encoder has a full pool.
     """
     if not retrieved_docs or not looks_like_definition_question(question):
         return retrieved_docs
@@ -92,10 +148,13 @@ def refine_docs_for_definition_retrieval(
     def _matches(ds: list[dict]) -> list[dict]:
         return [d for d in ds if chunk_matches_definition_focus(focus, d.get("text", ""))]
 
-    hits = _matches(retrieved_docs)
-    if len(hits) >= 3:
-        return _sort_by_distance(hits)[:retrieve_k]
+    # Lexical scan: guaranteed to find on-topic chunks even with noisy embeddings
+    try:
+        lexical = _lexical_scan_for_focus(focus, k=retrieve_k)
+    except Exception:
+        lexical = []
 
+    # FAISS booster for semantic diversity
     booster = f"{focus} dermatology clinical pathogenesis diagnosis"
     try:
         raw_extra = search(booster, k=retrieve_k)
@@ -105,9 +164,10 @@ def refine_docs_for_definition_retrieval(
     except Exception:
         extra = []
 
+    # Merge all three pools (deduped)
     seen: set[tuple] = set()
     merged: list[dict] = []
-    for pool in (retrieved_docs, extra):
+    for pool in (lexical, retrieved_docs, extra):
         for d in pool:
             key = (
                 d.get("source"),
@@ -120,18 +180,20 @@ def refine_docs_for_definition_retrieval(
             seen.add(key)
             merged.append(dict(d))
 
-    hits2 = _matches(merged)
-    if hits2:
-        return _sort_by_distance(hits2)[:retrieve_k]
-    if hits:
-        return _sort_by_distance(hits)[:retrieve_k]
-    return retrieved_docs
+    # Rank-boost: topically-matching chunks come first, rest follow
+    hits = _matches(merged)
+    non_hits = [d for d in merged if d not in hits]
+    ranked = _sort_by_distance(hits) + _sort_by_distance(non_hits)
+    return ranked[:retrieve_k]
 
 
 def topic_alignment_adjustment(user_question: str, chunk_text: str) -> int:
     """
-    Downrank passages whose *primary* topic conflicts with a definitional focus
-    (e.g. rosacea chapter hits 'acne rosacea' + 'definition' for 'What is acne?').
+    Adjust chunk priority based on how well it aligns with the question's focus entity.
+
+    - Positive boost when the focus term appears prominently in the chunk (overrides
+      generic "is a" prose cues from book introductions, tables of contents, etc.)
+    - Negative penalty for confirmed off-topic passages (e.g. rosacea chunks for acne).
     """
     focus = extract_definition_focus(user_question)
     if not focus:
@@ -140,6 +202,7 @@ def topic_alignment_adjustment(user_question: str, chunk_text: str) -> int:
     t = (chunk_text or "").lower()
     focus_l = focus.lower()
 
+    # ── Acne-specific: downrank rosacea chapters for acne queries (runs first) ──
     acne_focus = focus_l in (
         "acne",
         "akne",
@@ -164,6 +227,24 @@ def topic_alignment_adjustment(user_question: str, chunk_text: str) -> int:
                 return -20
         if ros_hits >= 4 and not has_vulgaris and not acne_primary:
             return -12
+
+    # ── General positive boost: focus term present in the chunk ──────────────
+    # Use the longest token as the primary search term (handles multi-word
+    # conditions like "tinea versicolor" → primary_tok = "versicolor").
+    # This ensures the actual condition's chapter beats generic book introductions
+    # that happen to score high on "is a" prose cues.
+    primary_tok = max(focus_l.split(), key=len) if focus_l.split() else focus_l
+    if primary_tok and len(primary_tok) >= 3:
+        freq = len(re.findall(rf"\b{re.escape(primary_tok)}\b", t))
+        leads = bool(re.search(rf"\b{re.escape(primary_tok)}\b", t[:80]))
+        if leads:
+            return 10        # chunk opens with the condition → very strong boost
+        elif freq >= 4:
+            return 8         # condition mentioned 4+ times → clearly on-topic
+        elif freq >= 2:
+            return 5         # mentioned twice → likely on-topic
+        elif freq == 1:
+            return 1         # mentioned once → weak signal, minor boost
 
     return 0
 
@@ -209,15 +290,32 @@ def definition_priority(text: str, user_question: str | None = None) -> int:
     return score
 
 
+_PDF_ARTIFACT_RE = re.compile(r"/H\d{4,6}\s*")
+
+
+def _clean_chunk_text(text: str) -> str:
+    """Strip PDF extraction artifacts (/H18546 etc.) that pollute chunk text."""
+    return _PDF_ARTIFACT_RE.sub("", text).strip()
+
+
 def clean_docs_for_retrieval(docs: list[dict]) -> list[dict]:
     """Conservative junk filter before rerank (word count, boilerplate, heading-only)."""
     cleaned: list[dict] = []
     for d in docs:
-        t = (d.get("text") or "").strip()
-        if not t:
+        raw = (d.get("text") or "").strip()
+        if not raw:
             continue
-        tl = t.lower()
+        tl = raw.lower()
         if "intentionally left blank" in tl:
+            continue
+        # Fix section titles polluted during ingestion
+        sec = (d.get("section_title") or "").lower()
+        if "intentionally left blank" in sec:
+            d = dict(d)
+            d["section_title"] = "Unknown section"
+        # Strip /H##### PDF artifacts from text before rerank/LLM
+        t = _clean_chunk_text(raw)
+        if not t:
             continue
         words = t.split()
         if len(words) < 20:
@@ -226,6 +324,8 @@ def clean_docs_for_retrieval(docs: list[dict]) -> list[dict]:
         uppercase_ratio = sum(1 for c in t if c.isupper()) / max(n, 1)
         if uppercase_ratio > 0.6 and len(words) < 40:
             continue
+        d = dict(d)
+        d["text"] = t
         cleaned.append(d)
     return cleaned
 
@@ -304,12 +404,30 @@ def _clarification_for_missing_slots(
     return "What symptoms are you having? (e.g. itch, redness, flaking, pain)"
 
 
-def _should_skip_retrieval_for_slots(state: dict) -> tuple[bool, list[str]]:
+_PERSONAL_PRONOUN_RE = re.compile(
+    r"\b(my|i\s|i'|i'|me\b|our|we\s|i have|i've|i am|i'm)\b",
+    re.I,
+)
+
+
+def _question_is_personal(question: str) -> bool:
+    """True if the question is about the user's own symptoms (not a general knowledge question)."""
+    return bool(_PERSONAL_PRONOUN_RE.search(question or ""))
+
+
+def _should_skip_retrieval_for_slots(state: dict, question: str = "") -> tuple[bool, list[str]]:
     """
-    If True, skip FAISS + answer LLM and return a single clarification message instead.
+    If True, skip FAISS + answer LLM and return a clarification message instead.
+    Only gate personal symptom questions — never gate general knowledge questions
+    like "What causes rosacea?" or "How is melanoma diagnosed?".
     """
     goal = state.get("question_goal")
     if goal is None:
+        return False, []
+
+    # General knowledge questions ("What causes X?", "How is Y diagnosed?") must
+    # never be gated — they don't need the user's body_site or symptoms.
+    if not _question_is_personal(question):
         return False, []
 
     body_ok = bool(state.get("body_site"))
@@ -371,7 +489,7 @@ def answer_medical_question(
 
     skip, missing = (False, [])
     if not looks_like_definition_question(question):
-        skip, missing = _should_skip_retrieval_for_slots(updated_state)
+        skip, missing = _should_skip_retrieval_for_slots(updated_state, question=working_question)
     if (
         skip
         and working_question.strip() != (question or "").strip()
@@ -543,12 +661,14 @@ def build_retrieval_debug(
         "selected_sources": [
             {
                 "source": doc.get("source"),
+                "section_title": doc.get("section_title"),
                 "page_start": doc.get("page_start"),
                 "page_end": doc.get("page_end"),
                 "score": doc.get("score"),
                 "rerank_score": doc.get("rerank_score"),
                 "definition_priority": doc.get("definition_priority"),
                 "distance": doc.get("distance", doc.get("score")),
+                "text": (doc.get("text") or "")[:600],  # include chunk text for eval/debug
             }
             for doc in selected_docs
         ],

@@ -1,0 +1,162 @@
+[
+  {
+    "id": "en_mel_01",
+    "language": "en",
+    "classifier_class": "MEL",
+    "question": "What is melanoma?",
+    "ground_truth": "Melanoma is a malignant tumor arising from melanocytes, the pigment-producing cells of the skin. It is the most dangerous form of skin cancer, capable of rapid metastasis. Risk factors include UV exposure, fair skin, multiple nevi, and family history.",
+    "expected_keywords": ["melanocyte", "malignant", "metastasis", "UV", "skin cancer"]
+  },
+  {
+    "id": "en_mel_02",
+    "language": "en",
+    "classifier_class": "MEL",
+    "question": "How is melanoma diagnosed?",
+    "ground_truth": "Melanoma diagnosis involves clinical examination using the ABCDE criteria (asymmetry, border irregularity, color variation, diameter over 6mm, evolution), dermoscopy, and confirmed by excisional biopsy with histopathological examination.",
+    "expected_keywords": ["ABCDE", "dermoscopy", "biopsy", "histopathology", "asymmetry"]
+  },
+  {
+    "id": "en_bcc_01",
+    "language": "en",
+    "classifier_class": "BCC",
+    "question": "What is basal cell carcinoma?",
+    "ground_truth": "Basal cell carcinoma (BCC) is the most common skin cancer, arising from basal keratinocytes. It typically presents as a pearly or translucent nodule with telangiectasia, most often on sun-exposed areas. It rarely metastasizes but causes significant local tissue destruction.",
+    "expected_keywords": ["basal cell", "keratinocyte", "pearly", "telangiectasia", "sun-exposed"]
+  },
+  {
+    "id": "en_bcc_02",
+    "language": "en",
+    "classifier_class": "BCC",
+    "question": "What are the treatment options for basal cell carcinoma?",
+    "ground_truth": "Treatment for BCC includes surgical excision, Mohs micrographic surgery (for high-risk or recurrent lesions), curettage and electrodesiccation, cryotherapy, topical imiquimod or 5-fluorouracil for superficial BCC, and photodynamic therapy.",
+    "expected_keywords": ["excision", "Mohs", "curettage", "imiquimod", "cryotherapy"]
+  },
+  {
+    "id": "en_ak_01",
+    "language": "en",
+    "classifier_class": "AK",
+    "question": "What is actinic keratosis?",
+    "ground_truth": "Actinic keratosis (AK) is a premalignant lesion arising from atypical keratinocytes caused by chronic UV radiation exposure. It presents as rough, scaly patches on sun-damaged skin and carries a risk of progression to squamous cell carcinoma.",
+    "expected_keywords": ["premalignant", "keratinocyte", "UV", "scaly", "squamous cell carcinoma"]
+  },
+  {
+    "id": "en_scc_01",
+    "language": "en",
+    "classifier_class": "SCC",
+    "question": "What is squamous cell carcinoma of the skin?",
+    "ground_truth": "Cutaneous squamous cell carcinoma (SCC) is a malignant tumor of epidermal keratinocytes. It commonly arises from actinic keratoses and presents as an indurated, keratotic plaque or nodule on sun-exposed skin. It has metastatic potential, particularly in immunosuppressed patients.",
+    "expected_keywords": ["keratinocyte", "malignant", "actinic keratosis", "metastasis", "indurated"]
+  },
+  {
+    "id": "en_nv_01",
+    "language": "en",
+    "classifier_class": "NV",
+    "question": "What are melanocytic nevi?",
+    "ground_truth": "Melanocytic nevi (moles) are benign proliferations of melanocytes. They are classified as junctional, compound, or intradermal based on the location of nevus cells. Dysplastic nevi with atypical features carry an increased risk of melanoma transformation.",
+    "expected_keywords": ["melanocyte", "benign", "junctional", "compound", "dysplastic"]
+  },
+  {
+    "id": "en_bkl_01",
+    "language": "en",
+    "classifier_class": "BKL",
+    "question": "What is benign keratosis?",
+    "ground_truth": "Benign keratosis includes seborrheic keratosis and solar lentigo. Seborrheic keratosis presents as a well-demarcated, waxy, stuck-on appearing plaque that is common in older adults. They are entirely benign but may resemble melanoma clinically.",
+    "expected_keywords": ["seborrheic keratosis", "benign", "waxy", "stuck-on", "lentigo"]
+  },
+  {
+    "id": "en_df_01",
+    "language": "en",
+    "classifier_class": "DF",
+    "question": "What is dermatofibroma?",
+    "ground_truth": "Dermatofibroma is a common benign fibrohistiocytic tumor of the dermis, typically presenting as a firm, hyperpigmented papule or nodule on the lower extremities. It shows a characteristic dimple sign when pinched. The exact cause is unknown but may follow minor trauma.",
+    "expected_keywords": ["fibrohistiocytic", "benign", "dimple sign", "dermis", "hyperpigmented"]
+  },
+  {
+    "id": "en_vasc_01",
+    "language": "en",
+    "classifier_class": "VASC",
+    "question": "What are vascular lesions of the skin?",
+    "ground_truth": "Cutaneous vascular lesions include hemangiomas, port-wine stains, cherry angiomas, and pyogenic granulomas. They arise from abnormal proliferation or dilation of blood vessels in the skin. Dermoscopy reveals characteristic red lacunae, telangiectasias, or vascular patterns.",
+    "expected_keywords": ["hemangioma", "angioma", "telangiectasia", "vascular", "blood vessel"]
+  },
+  {
+    "id": "tr_mel_01",
+    "language": "tr",
+    "classifier_class": "MEL",
+    "question": "Melanom nedir?",
+    "ground_truth": "Melanom, derinin pigment üreten hücreleri olan melanositlerden kaynaklanan malign bir tümördür. En tehlikeli cilt kanseri türüdür ve hızla metastaz yapabilir. Risk faktörleri arasında UV ışınımı, açık ten, çok sayıda nevüs ve aile öyküsü yer alır.",
+    "expected_keywords": ["melanosit", "malign", "metastaz", "UV", "deri kanseri"]
+  },
+  {
+    "id": "tr_mel_02",
+    "language": "tr",
+    "classifier_class": "MEL",
+    "question": "Melanom nasıl teşhis edilir?",
+    "ground_truth": "Melanom tanısı; ABCDE kriterleri (asimetri, sınır düzensizliği, renk değişkenliği, 6 mm üzerinde çap, evrim) kullanılarak klinik muayene, dermoskopi ve eksizyonel biyopsi ile histopatolojik inceleme ile konulur.",
+    "expected_keywords": ["ABCDE", "dermoskopi", "biyopsi", "histopatoloji", "asimetri"]
+  },
+  {
+    "id": "tr_bcc_01",
+    "language": "tr",
+    "classifier_class": "BCC",
+    "question": "Bazal hücreli karsinom nedir?",
+    "ground_truth": "Bazal hücreli karsinom (BHK), bazal keratinositlerin köken aldığı en sık görülen deri kanseridir. Genellikle güneşe maruz kalan bölgelerde inci gibi parlak veya yarı saydam nodül şeklinde görülür. Nadiren metastaz yapar ancak ciddi lokal doku yıkımına neden olur.",
+    "expected_keywords": ["bazal hücre", "keratinosit", "parlak", "telenjiektazi", "güneş"]
+  },
+  {
+    "id": "tr_bcc_02",
+    "language": "tr",
+    "classifier_class": "BCC",
+    "question": "Bazal hücreli karsinom nasıl tedavi edilir?",
+    "ground_truth": "BHK tedavisi; cerrahi eksizyon, Mohs mikrografik cerrahi, küretaj ve elektrodesikasyon, kriyoterapi, yüzeyel lezyonlar için topikal imikimod veya 5-florourasil ve fotodinamik terapiyi kapsamaktadır.",
+    "expected_keywords": ["eksizyon", "Mohs", "küretaj", "imikimod", "kriyoterapi"]
+  },
+  {
+    "id": "tr_ak_01",
+    "language": "tr",
+    "classifier_class": "AK",
+    "question": "Aktinik keratoz nedir?",
+    "ground_truth": "Aktinik keratoz (AK), kronik UV radyasyonuna bağlı atipik keratinositlerin oluşturduğu premalign bir lezyondur. Güneş hasarı görmüş deride pürüzlü, skuamlı yamalar şeklinde görülür ve skuamöz hücreli karsinoma ilerleme riski taşır.",
+    "expected_keywords": ["premalign", "keratinosit", "UV", "skuam", "skuamöz hücreli karsinom"]
+  },
+  {
+    "id": "tr_scc_01",
+    "language": "tr",
+    "classifier_class": "SCC",
+    "question": "Skuamöz hücreli karsinom nedir?",
+    "ground_truth": "Kutanöz skuamöz hücreli karsinom (SHK), epidermal keratinositlerin malign tümörüdür. Sıklıkla aktinik keratozdan gelişir ve güneşe maruz kalan bölgelerde indüre, keratotik plak veya nodül olarak görülür. Özellikle immünsüprese hastalarda metastaz potansiyeli taşır.",
+    "expected_keywords": ["keratinosit", "malign", "aktinik keratoz", "metastaz", "indüre"]
+  },
+  {
+    "id": "tr_nv_01",
+    "language": "tr",
+    "classifier_class": "NV",
+    "question": "Melanositik nevüs nedir?",
+    "ground_truth": "Melanositik nevüsler (benler), melanositlerin iyi huylu proliferasyonlarıdır. Nevüs hücrelerinin lokalizasyonuna göre jungsiyonel, bileşik veya intradermal olarak sınıflandırılır. Atipik özelliklere sahip displastik nevüsler melanom gelişimi açısından artmış risk taşır.",
+    "expected_keywords": ["melanosit", "benign", "jungsiyonel", "bileşik", "displastik"]
+  },
+  {
+    "id": "tr_bkl_01",
+    "language": "tr",
+    "classifier_class": "BKL",
+    "question": "Seboreik keratoz nedir?",
+    "ground_truth": "Seboreik keratoz, iyi huylu bir epidermal tümördür. Özellikle yaşlılarda sık görülür ve yapışık, mumsu görünümlü, iyi sınırlı plaklar şeklinde karşımıza çıkar. Klinik olarak melanoma benzeyebilir ancak tamamen benigndirler.",
+    "expected_keywords": ["seboreik keratoz", "benign", "mumsu", "yapışık", "epidermal"]
+  },
+  {
+    "id": "tr_df_01",
+    "language": "tr",
+    "classifier_class": "DF",
+    "question": "Dermatofibrom nedir?",
+    "ground_truth": "Dermatofibrom, dermiste yerleşen yaygın bir iyi huylu fibrohistiositik tümördür. Genellikle alt ekstremitelerde sert, hiperpigmente papül veya nodül olarak görülür. Sıkıştırıldığında karakteristik gamze (dimple) belirtisi verir.",
+    "expected_keywords": ["fibrohistiositik", "benign", "gamze belirtisi", "dermis", "hiperpigmente"]
+  },
+  {
+    "id": "tr_vasc_01",
+    "language": "tr",
+    "classifier_class": "VASC",
+    "question": "Deri vasküler lezyonları nelerdir?",
+    "ground_truth": "Kutanöz vasküler lezyonlar; hemanjiyom, port-şarabı lekesi, kiraz anjiyomu ve piyojenik granülomu kapsar. Derideki kan damarlarının anormal proliferasyonu veya dilatasyonundan kaynaklanır. Dermoskopide karakteristik kırmızı laküner yapılar, telenjiektazi veya vasküler örüntüler izlenir.",
+    "expected_keywords": ["hemanjiyom", "anjiyom", "telenjiektazi", "vasküler", "kan damarı"]
+  }
+]
